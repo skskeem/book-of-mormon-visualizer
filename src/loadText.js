@@ -1,3 +1,26 @@
+// Book definitions with colors - 15 books of the Book of Mormon
+export const BOOK_DEFINITIONS = [
+    { name: '1 Nephi', pattern: /^1 Nephi \d+:/, color: 0x3B82F6 },      // Blue
+    { name: '2 Nephi', pattern: /^2 Nephi \d+:/, color: 0x8B5CF6 },      // Purple
+    { name: 'Jacob', pattern: /^Jacob \d+:/, color: 0xEC4899 },          // Pink
+    { name: 'Enos', pattern: /^Enos 1:/, color: 0xF97316 },              // Orange
+    { name: 'Jarom', pattern: /^Jarom 1:/, color: 0xFB923C },            // Light Orange
+    { name: 'Omni', pattern: /^Omni 1:/, color: 0xFBBF24 },              // Amber
+    { name: 'Words of Mormon', pattern: /^Words of Mormon 1:/, color: 0xA3E635 }, // Lime
+    { name: 'Mosiah', pattern: /^Mosiah \d+:/, color: 0x10B981 },        // Emerald
+    { name: 'Alma', pattern: /^Alma \d+:/, color: 0xEF4444 },            // Red
+    { name: 'Helaman', pattern: /^Helaman \d+:/, color: 0xF59E0B },      // Amber/Gold
+    { name: '3 Nephi', pattern: /^3 Nephi \d+:/, color: 0x06B6D4 },      // Cyan
+    { name: '4 Nephi', pattern: /^4 Nephi 1:/, color: 0x84CC16 },        // Lime Green
+    { name: 'Mormon', pattern: /^Mormon \d+:/, color: 0x6366F1 },        // Indigo
+    { name: 'Ether', pattern: /^Ether \d+:/, color: 0x14B8A6 },          // Teal
+    { name: 'Moroni', pattern: /^Moroni \d+:/, color: 0xA855F7 },        // Violet
+];
+
+// Pattern to match verse references at the start of a line
+// Matches: "1 Nephi 1:1", "Alma 32:21", "Words of Mormon 1:5", etc.
+const VERSE_PATTERN = /^(1 Nephi|2 Nephi|3 Nephi|4 Nephi|Jacob|Enos|Jarom|Omni|Words of Mormon|Mosiah|Alma|Helaman|Mormon|Ether|Moroni) \d+:\d+/;
+
 // Load and parse the Book of Mormon text file
 export async function loadBookOfMormon() {
     try {
@@ -6,32 +29,77 @@ export async function loadBookOfMormon() {
         
         // Optimized single-pass parsing
         const lines = text.split('\n');
-        let startIndex = 0;
         let foundStart = false;
-        const cleanedLines = [];
+        const verses = [];  // Each element is a complete verse
+        const bookMarkers = []; // Track where each book starts { bookIndex, lineIndex }
         
-        // Single pass: find start and clean in one loop
+        let currentBook = -1;
+        let currentVerse = '';
+        
+        // Single pass: find start, join lines into verses, track books
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i].trim();
             
             // Find start marker
             if (!foundStart && line === 'THE BOOK OF MORMON') {
-                startIndex = i + 1;
                 foundStart = true;
                 continue;
             }
             
             // Only process after start is found
             if (foundStart && line.length > 0 && !line.startsWith('***') && !line.startsWith('[')) {
-                cleanedLines.push(line);
+                // Check if this line starts a new verse
+                if (VERSE_PATTERN.test(line)) {
+                    // Save the previous verse if it exists
+                    if (currentVerse.length > 0) {
+                        verses.push(currentVerse);
+                    }
+                    
+                    // Check if this verse starts a new book
+                    for (let bookIdx = 0; bookIdx < BOOK_DEFINITIONS.length; bookIdx++) {
+                        if (BOOK_DEFINITIONS[bookIdx].pattern.test(line)) {
+                            if (bookIdx !== currentBook) {
+                                currentBook = bookIdx;
+                                bookMarkers.push({
+                                    bookIndex: bookIdx,
+                                    lineIndex: verses.length  // Will be the index of this new verse
+                                });
+                            }
+                            break;
+                        }
+                    }
+                    
+                    // Start a new verse
+                    currentVerse = line;
+                } else {
+                    // Continue the current verse (join with space)
+                    if (currentVerse.length > 0) {
+                        currentVerse += ' ' + line;
+                    } else {
+                        currentVerse = line;
+                    }
+                }
             }
         }
         
-        return cleanedLines.join('\n');
+        // Don't forget the last verse
+        if (currentVerse.length > 0) {
+            verses.push(currentVerse);
+        }
+        
+        console.log(`Parsed ${verses.length} verses`);
+        
+        return {
+            text: verses.join('\n'),
+            bookMarkers: bookMarkers
+        };
     } catch (error) {
         console.error('Error loading Book of Mormon text:', error);
         // Fallback to a sample text if file can't be loaded
-        return 'Error loading text. Please ensure bom.txt is in the public directory.';
+        return {
+            text: 'Error loading text. Please ensure bom.txt is in the public directory.',
+            bookMarkers: []
+        };
     }
 }
 

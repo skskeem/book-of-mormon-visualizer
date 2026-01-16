@@ -64,9 +64,10 @@ async function init() {
         // Load Book of Mormon text
         updateLoadingText('Loading text file...');
         const loadStart = performance.now();
-        const text = await loadBookOfMormon();
+        const { text, bookMarkers } = await loadBookOfMormon();
         const loadTime = performance.now() - loadStart;
         console.log(`Text loaded in ${loadTime.toFixed(2)}ms, length:`, text.length);
+        console.log(`Found ${bookMarkers.length} book markers`);
         
         if (!text || text.length === 0) {
             console.error('No text loaded!');
@@ -77,9 +78,9 @@ async function init() {
         // Update loading message
         updateLoadingText('Processing text...');
         
-        // Create visualization (now async) - pass progress callback
+        // Create visualization (now async) - pass progress callback and book markers
         const processStart = performance.now();
-        visualization = await createVisualization(text, app, updateLoadingText);
+        visualization = await createVisualization(text, app, updateLoadingText, bookMarkers);
         const processTime = performance.now() - processStart;
         console.log(`Visualization created in ${processTime.toFixed(2)}ms`);
         

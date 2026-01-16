@@ -1,6 +1,7 @@
 import { Container, Text, Graphics, TextStyle } from 'pixi.js';
+import { BOOK_DEFINITIONS } from './loadText.js';
 
-export async function createVisualization(text, app, progressCallback = null) {
+export async function createVisualization(text, app, progressCallback = null, bookMarkers = []) {
     const container = new Container();
     app.stage.addChild(container);
 
@@ -21,123 +22,169 @@ export async function createVisualization(text, app, progressCallback = null) {
     let offsetX = 0;
     let offsetY = 0;
     let searchMatches = [];
+    let matchesByLine = new Map();
     let searchResultCount = 0;
     let initialZoom = 1;
     let currentMatchIndex = -1; // Track which match is currently in view
+    const MAX_TEXT_RESOLUTION = 3;
+    let currentTextResolution = 1;
 
-    // Optimized: Split text into words and create lines in chunks - process in larger batches
-    if (progressCallback) progressCallback('Splitting text into words...');
-    const words = text.split(/\s+/);
+    // Process verses and wrap them to fit within column width
+    if (progressCallback) progressCallback('Processing verses...');
+    const verses = text.split('\n');
     const lines = [];
-    let currentLine = '';
+    const verseStartLines = []; // Track which line index each verse starts at
     const lineWidth = config.lineWidth;
-    const totalWords = words.length;
-    const chunkSize = 20000; // Process 20k words at a time for better performance
+    const versesLength = verses.length;
     
-    // Process words in larger chunks
-    for (let chunkStart = 0; chunkStart < words.length; chunkStart += chunkSize) {
-        const chunkEnd = Math.min(chunkStart + chunkSize, words.length);
+    // Pre-compile regex for word splitting
+    const wordSplitRegex = /\s+/;
+    
+    // Process verses in batches for better performance
+    const BATCH_SIZE = 500;
+    for (let batchStart = 0; batchStart < versesLength; batchStart += BATCH_SIZE) {
+        const batchEnd = Math.min(batchStart + BATCH_SIZE, versesLength);
         
-        for (let i = chunkStart; i < chunkEnd; i++) {
-            const word = words[i];
-            const testLine = currentLine ? currentLine + ' ' + word : word;
+        for (let v = batchStart; v < batchEnd; v++) {
+            const verse = verses[v];
+            if (verse.length === 0) continue;
             
-            if (testLine.length > lineWidth && currentLine.length > 0) {
-                lines.push(currentLine);
-                currentLine = word;
-            } else {
-                currentLine = testLine;
+            verseStartLines.push(lines.length);
+            
+            // Fast path: if verse fits in one line, no need to split
+            if (verse.length <= lineWidth) {
+                lines.push(verse);
+                continue;
             }
-        }
-        
-        // Yield to browser after each chunk
-        if (progressCallback) {
-            const percent = Math.floor((chunkEnd / totalWords) * 100);
-            progressCallback(`Processing text... ${percent}%`);
-        }
-        await new Promise(resolve => setTimeout(resolve, 0));
-    }
-    
-    if (currentLine) {
-        lines.push(currentLine);
-    }
-
-    // Identify book headers and assign book indices - optimized with pre-compiled regex
-    if (progressCallback) progressCallback('Identifying books...');
-    const bookNames = [
-        '1 Nephi', '2 Nephi', 'Jacob', 'Enos', 'Jarom', 'Omni', 
-        'Words of Mormon', 'Mosiah', 'Alma', 'Helaman', 
-        '3 Nephi', '4 Nephi', 'Mormon', 'Ether', 'Moroni'
-    ];
-    
-    // Pre-compile regex patterns for better performance
-    const bookPatterns = bookNames.map(name => ({
-        name,
-        exact: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`),
-        withChapter: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+\\d+$`)
-    }));
-    
-    const lineMetadata = [];
-    let currentBookIndex = 0;
-    const bookColors = [
-        0x1a1a1a, 0x1f1f1f, 0x1a1a1a, 0x1f1f1f, 0x1a1a1a, 0x1f1f1f,
-        0x1a1a1a, 0x1f1f1f, 0x1a1a1a, 0x1f1f1f, 0x1a1a1a, 0x1f1f1f,
-        0x1a1a1a, 0x1f1f1f, 0x1a1a1a
-    ];
-    
-    // Process metadata in chunks for better performance
-    const metadataChunkSize = 25000; // Larger chunks for metadata processing
-    for (let chunkStart = 0; chunkStart < lines.length; chunkStart += metadataChunkSize) {
-        const chunkEnd = Math.min(chunkStart + metadataChunkSize, lines.length);
-        
-        for (let i = chunkStart; i < chunkEnd; i++) {
-            const line = lines[i].trim();
-            let isBookHeader = false;
             
-            // Check if this line is a book header using pre-compiled patterns
-            for (const pattern of bookPatterns) {
-                if (pattern.exact.test(line) || pattern.withChapter.test(line)) {
-                    isBookHeader = true;
-                    currentBookIndex = bookNames.indexOf(pattern.name);
-                    break;
+            // Wrap this verse
+            const words = verse.split(wordSplitRegex);
+            let currentLine = '';
+            let currentLen = 0;
+            
+            for (let w = 0; w < words.length; w++) {
+                const word = words[w];
+                const wordLen = word.length;
+                const newLen = currentLen === 0 ? wordLen : currentLen + 1 + wordLen;
+                
+                if (newLen > lineWidth && currentLen > 0) {
+                    lines.push(currentLine);
+                    currentLine = word;
+                    currentLen = wordLen;
+                } else {
+                    currentLine = currentLen === 0 ? word : currentLine + ' ' + word;
+                    currentLen = newLen;
                 }
             }
             
-            lineMetadata.push({
-                isBookHeader,
-                bookIndex: currentBookIndex,
-                bookColor: bookColors[currentBookIndex % bookColors.length]
-            });
+            if (currentLen > 0) {
+                lines.push(currentLine);
+            }
         }
         
-        // Yield periodically
-        if (chunkStart % (metadataChunkSize * 5) === 0 && progressCallback) {
-            const percent = Math.floor((chunkEnd / lines.length) * 100);
-            progressCallback(`Identifying books... ${percent}%`);
+        // Yield to browser after each batch
+        if (progressCallback) {
+            const percent = Math.floor((batchEnd / versesLength) * 100);
+            progressCallback(`Processing verses... ${percent}%`);
         }
         await new Promise(resolve => setTimeout(resolve, 0));
     }
-    
+
     if (progressCallback) progressCallback('Finalizing...');
 
-    console.log('Created', lines.length, 'lines of text');
+    console.log('Created', lines.length, 'wrapped lines from', verses.length, 'verses');
 
-    // Split lines into six columns
-    const linesPerColumn = Math.ceil(lines.length / 6);
-    const column1Lines = lines.slice(0, linesPerColumn);
-    const column2Lines = lines.slice(linesPerColumn, linesPerColumn * 2);
-    const column3Lines = lines.slice(linesPerColumn * 2, linesPerColumn * 3);
-    const column4Lines = lines.slice(linesPerColumn * 3, linesPerColumn * 4);
-    const column5Lines = lines.slice(linesPerColumn * 4, linesPerColumn * 5);
-    const column6Lines = lines.slice(linesPerColumn * 5);
+    // Split lines into eight columns
+    const numColumns = 8;
+    const linesPerColumn = Math.ceil(lines.length / numColumns);
+    const columnLines = [];
+    for (let i = 0; i < numColumns; i++) {
+        columnLines.push(lines.slice(linesPerColumn * i, linesPerColumn * (i + 1)));
+    }
+    
+    // Pre-calculate frequently used values
+    const columnWidth = config.lineWidth * config.charWidth;
+    const cachedColumnXPositions = [];
+    for (let i = 0; i < numColumns; i++) {
+        cachedColumnXPositions.push(config.padding + i * (columnWidth + config.columnGap));
+    }
+    const maxColumnLength = Math.max(...columnLines.map(col => col.length));
+
+    // Map each wrapped line to its book using bookMarkers and verseStartLines
+    // bookMarkers contains { bookIndex, lineIndex } where lineIndex is the verse index
+    // verseStartLines maps verse index -> first wrapped line index for that verse
+    const lineToBook = new Array(lines.length).fill(0);
+    if (bookMarkers.length > 0) {
+        // Convert verse-based book markers to line-based
+        // bookMarkers[i].lineIndex is a verse index, convert it to wrapped line index
+        const lineBasedMarkers = bookMarkers.map(marker => ({
+            bookIndex: marker.bookIndex,
+            lineIndex: verseStartLines[marker.lineIndex] ?? 0
+        }));
+        
+        let markerIdx = 0;
+        let currentBookIndex = lineBasedMarkers[0]?.bookIndex ?? 0;
+        
+        for (let i = 0; i < lines.length; i++) {
+            // Check if we've reached the next book marker
+            while (markerIdx < lineBasedMarkers.length && i >= lineBasedMarkers[markerIdx].lineIndex) {
+                currentBookIndex = lineBasedMarkers[markerIdx].bookIndex;
+                markerIdx++;
+            }
+            lineToBook[i] = currentBookIndex;
+        }
+    }
+    
+    // Calculate book regions (contiguous ranges of lines for each book in each column)
+    // Each region: { bookIndex, startLine, endLine, column }
+    const bookRegions = [];
+    
+    for (let col = 0; col < numColumns; col++) {
+        const colLines = columnLines[col];
+        const colOffset = col * linesPerColumn;
+        
+        if (colLines.length === 0) continue;
+        
+        let currentRegionBook = lineToBook[colOffset];
+        let regionStart = 0;
+        
+        for (let i = 0; i < colLines.length; i++) {
+            const globalLineIndex = colOffset + i;
+            const bookIdx = lineToBook[globalLineIndex] ?? currentRegionBook;
+            
+            if (bookIdx !== currentRegionBook) {
+                // Close the previous region
+                bookRegions.push({
+                    bookIndex: currentRegionBook,
+                    startLine: regionStart,
+                    endLine: i - 1,
+                    column: col
+                });
+                // Start a new region
+                currentRegionBook = bookIdx;
+                regionStart = i;
+            }
+        }
+        // Close the final region for this column
+        bookRegions.push({
+            bookIndex: currentRegionBook,
+            startLine: regionStart,
+            endLine: colLines.length - 1,
+            column: col
+        });
+    }
+    
+    console.log('Created', bookRegions.length, 'book regions across columns');
+
+    // Create background graphics layer for book colors (rendered behind text)
+    const bookBackgroundGraphics = new Graphics();
+    container.addChild(bookBackgroundGraphics);
 
     // Performance optimizations: viewport culling and sprite pooling
     const textSprites = new Map(); // Map of originalIndex -> sprite entry
     const spritePool = []; // Pool of reusable sprites
     const highlightGraphics = new Graphics(); // Keep for backward compatibility, but we'll use individual Graphics
     const highlightSprites = new Map(); // Map of matchIndex -> Graphics object for clickable highlights
-    const bookBackgroundGraphics = new Graphics();
-    container.addChild(bookBackgroundGraphics);
     container.addChild(highlightGraphics);
 
     // Create TextStyle objects for reuse with improved clarity
@@ -147,15 +194,6 @@ export async function createVisualization(text, app, progressCallback = null) {
         fill: config.textColor,
         letterSpacing: 0, // Tighter letter spacing for clarity
         textBaseline: 'alphabetic', // Better baseline alignment
-    });
-    
-    const bookHeaderStyle = new TextStyle({
-        fontFamily: 'monospace',
-        fontSize: config.fontSize + 3,
-        fill: 0x4a9eff, // Blue color for book headers
-        fontWeight: 'bold',
-        letterSpacing: 0,
-        textBaseline: 'alphabetic',
     });
 
     // Get a sprite from pool or create new one
@@ -176,179 +214,89 @@ export async function createVisualization(text, app, progressCallback = null) {
         spritePool.push(sprite);
     }
 
+    function getTextResolutionForZoom() {
+        if (zoom >= 2.5) return Math.min(3, MAX_TEXT_RESOLUTION);
+        if (zoom >= 1.35) return Math.min(2, MAX_TEXT_RESOLUTION);
+        return 1;
+    }
+
+    function applyTextResolution(sprite, resolution) {
+        if (sprite.resolution !== resolution) {
+            sprite.resolution = resolution;
+            if (typeof sprite.updateText === 'function') {
+                sprite.updateText();
+            }
+        }
+    }
+
     // Calculate visible line range based on viewport
+    // Reuse object to avoid GC pressure
+    const visibleRangeResult = { start: 0, end: 0 };
+    const SCROLL_PADDING = 50;
+    
     function getVisibleLineRange() {
         // Calculate viewport bounds in world coordinates
-        const worldTop = (-offsetY) / zoom;
-        const worldBottom = (app.screen.height - offsetY) / zoom;
-        const worldLeft = (-offsetX) / zoom;
-        const worldRight = (app.screen.width - offsetX) / zoom;
+        const invZoom = 1 / zoom;
+        const worldTop = -offsetY * invZoom;
+        const worldBottom = (app.screen.height - offsetY) * invZoom;
 
-        // Add padding for smooth scrolling (render extra lines)
-        const padding = 50;
-        const visibleTop = Math.max(0, Math.floor((worldTop - config.padding - padding) / config.lineHeight));
-        const visibleBottom = Math.min(
-            Math.max(column1Lines.length, column2Lines.length, column3Lines.length, column4Lines.length, column5Lines.length, column6Lines.length),
-            Math.ceil((worldBottom - config.padding + padding) / config.lineHeight)
+        visibleRangeResult.start = Math.max(0, ((worldTop - config.padding - SCROLL_PADDING) / config.lineHeight) | 0);
+        visibleRangeResult.end = Math.min(
+            maxColumnLength,
+            Math.ceil((worldBottom - config.padding + SCROLL_PADDING) / config.lineHeight)
         );
 
-        return { start: visibleTop, end: visibleBottom };
+        return visibleRangeResult;
     }
 
     // Render only visible text (viewport culling)
+    // Reuse Set to avoid allocation
+    const visibleIndicesSet = new Set();
+    
     function renderVisibleText() {
         const visibleRange = getVisibleLineRange();
-        const columnWidth = config.lineWidth * config.charWidth;
-        const column1X = config.padding;
-        const column2X = column1X + columnWidth + config.columnGap;
-        const column3X = column2X + columnWidth + config.columnGap;
-        const column4X = column3X + columnWidth + config.columnGap;
-        const column5X = column4X + columnWidth + config.columnGap;
-        const column6X = column5X + columnWidth + config.columnGap;
-
-        // Track which sprites are still visible
-        const visibleIndices = new Set();
-
-        // Render visible lines from column 1
-        for (let lineIndex = visibleRange.start; lineIndex < visibleRange.end && lineIndex < column1Lines.length; lineIndex++) {
-            const originalIndex = lineIndex;
-            visibleIndices.add(originalIndex);
-            const metadata = lineMetadata[originalIndex];
-
-            let entry = textSprites.get(originalIndex);
-            if (!entry) {
-                const sprite = metadata?.isBookHeader ? new Text('', bookHeaderStyle) : getSprite();
-                entry = { sprite, column: 0, lineIndex, originalIndex };
-                textSprites.set(originalIndex, entry);
-            }
-
-            entry.sprite.text = column1Lines[lineIndex];
-            entry.sprite.x = column1X;
-            entry.sprite.y = config.padding + lineIndex * config.lineHeight;
-            entry.sprite.visible = true;
-
-            if (!entry.sprite.parent) {
-                container.addChild(entry.sprite);
-            }
-        }
-
-        // Render visible lines from column 2
-        for (let lineIndex = visibleRange.start; lineIndex < visibleRange.end && lineIndex < column2Lines.length; lineIndex++) {
-            const originalIndex = linesPerColumn + lineIndex;
-            visibleIndices.add(originalIndex);
-            const metadata = lineMetadata[originalIndex];
-
-            let entry = textSprites.get(originalIndex);
-            if (!entry) {
-                const sprite = metadata?.isBookHeader ? new Text('', bookHeaderStyle) : getSprite();
-                entry = { sprite, column: 1, lineIndex, originalIndex };
-                textSprites.set(originalIndex, entry);
-            }
-
-            entry.sprite.text = column2Lines[lineIndex];
-            entry.sprite.x = column2X;
-            entry.sprite.y = config.padding + lineIndex * config.lineHeight;
-            entry.sprite.visible = true;
-
-            if (!entry.sprite.parent) {
-                container.addChild(entry.sprite);
-            }
-        }
-
-        // Render visible lines from column 3
-        for (let lineIndex = visibleRange.start; lineIndex < visibleRange.end && lineIndex < column3Lines.length; lineIndex++) {
-            const originalIndex = linesPerColumn * 2 + lineIndex;
-            visibleIndices.add(originalIndex);
-            const metadata = lineMetadata[originalIndex];
-
-            let entry = textSprites.get(originalIndex);
-            if (!entry) {
-                const sprite = metadata?.isBookHeader ? new Text('', bookHeaderStyle) : getSprite();
-                entry = { sprite, column: 2, lineIndex, originalIndex };
-                textSprites.set(originalIndex, entry);
-            }
-
-            entry.sprite.text = column3Lines[lineIndex];
-            entry.sprite.x = column3X;
-            entry.sprite.y = config.padding + lineIndex * config.lineHeight;
-            entry.sprite.visible = true;
-
-            if (!entry.sprite.parent) {
-                container.addChild(entry.sprite);
-            }
-        }
-
-        // Render visible lines from column 4
-        for (let lineIndex = visibleRange.start; lineIndex < visibleRange.end && lineIndex < column4Lines.length; lineIndex++) {
-            const originalIndex = linesPerColumn * 3 + lineIndex;
-            visibleIndices.add(originalIndex);
-            const metadata = lineMetadata[originalIndex];
-
-            let entry = textSprites.get(originalIndex);
-            if (!entry) {
-                const sprite = metadata?.isBookHeader ? new Text('', bookHeaderStyle) : getSprite();
-                entry = { sprite, column: 3, lineIndex, originalIndex };
-                textSprites.set(originalIndex, entry);
-            }
-
-            entry.sprite.text = column4Lines[lineIndex];
-            entry.sprite.x = column4X;
-            entry.sprite.y = config.padding + lineIndex * config.lineHeight;
-            entry.sprite.visible = true;
-
-            if (!entry.sprite.parent) {
-                container.addChild(entry.sprite);
-            }
-        }
-
-        // Render visible lines from column 5
-        for (let lineIndex = visibleRange.start; lineIndex < visibleRange.end && lineIndex < column5Lines.length; lineIndex++) {
-            const originalIndex = linesPerColumn * 4 + lineIndex;
-            visibleIndices.add(originalIndex);
-            const metadata = lineMetadata[originalIndex];
-
-            let entry = textSprites.get(originalIndex);
-            if (!entry) {
-                const sprite = metadata?.isBookHeader ? new Text('', bookHeaderStyle) : getSprite();
-                entry = { sprite, column: 4, lineIndex, originalIndex };
-                textSprites.set(originalIndex, entry);
-            }
-
-            entry.sprite.text = column5Lines[lineIndex];
-            entry.sprite.x = column5X;
-            entry.sprite.y = config.padding + lineIndex * config.lineHeight;
-            entry.sprite.visible = true;
-
-            if (!entry.sprite.parent) {
-                container.addChild(entry.sprite);
-            }
-        }
-
-        // Render visible lines from column 6
-        for (let lineIndex = visibleRange.start; lineIndex < visibleRange.end && lineIndex < column6Lines.length; lineIndex++) {
-            const originalIndex = linesPerColumn * 5 + lineIndex;
-            visibleIndices.add(originalIndex);
-            const metadata = lineMetadata[originalIndex];
-
-            let entry = textSprites.get(originalIndex);
-            if (!entry) {
-                const sprite = metadata?.isBookHeader ? new Text('', bookHeaderStyle) : getSprite();
-                entry = { sprite, column: 5, lineIndex, originalIndex };
-                textSprites.set(originalIndex, entry);
-            }
-
-            entry.sprite.text = column6Lines[lineIndex];
-            entry.sprite.x = column6X;
-            entry.sprite.y = config.padding + lineIndex * config.lineHeight;
-            entry.sprite.visible = true;
-
-            if (!entry.sprite.parent) {
-                container.addChild(entry.sprite);
-            }
-        }
         
-        // Render book backgrounds after text
-        renderBookBackgrounds();
+        // Clear and reuse the set
+        visibleIndicesSet.clear();
+        const visibleIndices = visibleIndicesSet;
+
+        const textResolution = currentTextResolution;
+
+        // Render visible lines from all columns
+        for (let col = 0; col < numColumns; col++) {
+            const colLines = columnLines[col];
+            const colX = cachedColumnXPositions[col];
+            const colLinesLen = colLines.length;
+            const rangeEnd = visibleRange.end;
+            
+            for (let lineIndex = visibleRange.start; lineIndex < rangeEnd && lineIndex < colLinesLen; lineIndex++) {
+                const originalIndex = linesPerColumn * col + lineIndex;
+                visibleIndices.add(originalIndex);
+
+                let entry = textSprites.get(originalIndex);
+                if (!entry) {
+                    const sprite = getSprite();
+                    entry = { sprite, column: col, lineIndex, originalIndex };
+                    textSprites.set(originalIndex, entry);
+                }
+
+                const sprite = entry.sprite;
+                applyTextResolution(sprite, textResolution);
+                
+                // Only update text if changed
+                const lineText = colLines[lineIndex];
+                if (sprite.text !== lineText) {
+                    sprite.text = lineText;
+                }
+                sprite.x = colX;
+                sprite.y = config.padding + lineIndex * config.lineHeight;
+                sprite.visible = true;
+
+                if (!sprite.parent) {
+                    container.addChild(sprite);
+                }
+            }
+        }
 
         // Remove sprites that are no longer visible
         for (const [index, entry] of textSprites.entries()) {
@@ -358,59 +306,41 @@ export async function createVisualization(text, app, progressCallback = null) {
             }
         }
     }
-    
-    // Render book backgrounds for visible sections
+
+    // Render colored background bands for each book
     function renderBookBackgrounds() {
         bookBackgroundGraphics.clear();
+        
+        if (bookRegions.length === 0) return;
+        
+        // Calculate opacity based on zoom level - more visible when zoomed out
+        const opacity = zoom < 0.1 ? 0.35 : (zoom < 0.3 ? 0.25 : 0.15);
+        
+        // Get visible range to only render what's needed
         const visibleRange = getVisibleLineRange();
-        const columnWidth = config.lineWidth * config.charWidth;
-        const totalWidth = columnWidth * 6 + config.columnGap * 5;
-        const column1X = config.padding;
+        const rangeStart = visibleRange.start;
+        const rangeEnd = visibleRange.end;
+        const regionsLen = bookRegions.length;
         
-        // Track current book section
-        let currentBookStart = visibleRange.start;
-        let currentBookIndex = lineMetadata[visibleRange.start]?.bookIndex ?? 0;
-        
-        // Draw backgrounds for visible book sections
-        for (let i = visibleRange.start; i <= visibleRange.end && i < lines.length; i++) {
-            const metadata = lineMetadata[i];
-            if (!metadata) continue;
+        for (let r = 0; r < regionsLen; r++) {
+            const region = bookRegions[r];
+            const { bookIndex, startLine, endLine, column } = region;
             
-            // New book section detected
-            if (metadata.bookIndex !== currentBookIndex || metadata.isBookHeader) {
-                // Draw background for previous book section
-                if (i > currentBookStart) {
-                    const startY = config.padding + currentBookStart * config.lineHeight;
-                    const height = (i - currentBookStart) * config.lineHeight;
-                    const color = lineMetadata[currentBookStart]?.bookColor ?? 0x1a1a1a;
-                    
-                    bookBackgroundGraphics.beginFill(color, 0.2);
-                    bookBackgroundGraphics.drawRect(column1X - 5, startY, totalWidth + 10, height);
-                    bookBackgroundGraphics.endFill();
-                    
-                    // Draw border between books
-                    if (metadata.isBookHeader && i > visibleRange.start) {
-                        bookBackgroundGraphics.lineStyle(2, 0x4a9eff, 0.6);
-                        bookBackgroundGraphics.moveTo(column1X - 5, startY);
-                        bookBackgroundGraphics.lineTo(column1X + totalWidth + 5, startY);
-                        bookBackgroundGraphics.lineStyle(0);
-                    }
-                }
-                
-                currentBookStart = i;
-                currentBookIndex = metadata.bookIndex;
-            }
-        }
-        
-        // Draw background for last visible section
-        if (visibleRange.end > currentBookStart) {
-            const startY = config.padding + currentBookStart * config.lineHeight;
-            const endY = config.padding + Math.min(visibleRange.end, lines.length) * config.lineHeight;
-            const height = endY - startY;
-            const color = lineMetadata[currentBookStart]?.bookColor ?? 0x1a1a1a;
+            // Skip if region is outside visible range
+            if (endLine < rangeStart || startLine > rangeEnd) continue;
             
-            bookBackgroundGraphics.beginFill(color, 0.2);
-            bookBackgroundGraphics.drawRect(column1X - 5, startY, totalWidth + 10, height);
+            // Clip to visible range
+            const visibleStart = startLine > rangeStart ? startLine : rangeStart;
+            const visibleEnd = endLine < rangeEnd ? endLine : rangeEnd;
+            
+            const color = BOOK_DEFINITIONS[bookIndex]?.color ?? 0x666666;
+            const x = cachedColumnXPositions[column] - 2;
+            const y = config.padding + visibleStart * config.lineHeight - 1;
+            const width = columnWidth + 4;
+            const height = (visibleEnd - visibleStart + 1) * config.lineHeight + 2;
+            
+            bookBackgroundGraphics.beginFill(color, opacity);
+            bookBackgroundGraphics.drawRect(x, y, width, height);
             bookBackgroundGraphics.endFill();
         }
     }
@@ -455,74 +385,80 @@ export async function createVisualization(text, app, progressCallback = null) {
             padding = 0;
         }
 
-        // Create clickable highlights for visible matches
-        searchMatches.forEach((match, matchIndex) => {
-            const { lineIndex, startChar, endChar, lineText } = match;
-            
-            // Find the text sprite for this line (only if it's currently rendered)
-            const textEntry = textSprites.get(lineIndex);
-            if (!textEntry || !textEntry.sprite.visible) return;
-            
-            visibleMatchIndices.add(matchIndex);
-            
+        // Create clickable highlights for currently rendered lines only
+        for (const [originalIndex, textEntry] of textSprites.entries()) {
+            if (!textEntry || !textEntry.sprite.visible) continue;
+
+            const lineMatches = matchesByLine.get(originalIndex);
+            if (!lineMatches || lineMatches.length === 0) continue;
+
             const textSprite = textEntry.sprite;
 
-            // Calculate position of the match within the line
-            const beforeMatch = lineText.substring(0, startChar);
-            const matchText = lineText.substring(startChar, endChar);
-            
-            // Approximate character positions (monospace font)
-            const beforeWidth = beforeMatch.length * config.charWidth;
-            const matchWidth = matchText.length * config.charWidth;
-            
-            // Apply padding to make highlights larger at low zoom
-            const x = textSprite.x + beforeWidth - padding;
-            const y = textSprite.y - padding;
-            const width = matchWidth + padding * 2;
-            const height = config.lineHeight + padding * 2;
-            
-            // Get or create a Graphics object for this highlight
-            let highlightGraphic = highlightSprites.get(matchIndex);
-            if (!highlightGraphic) {
-                highlightGraphic = new Graphics();
-                highlightGraphic.eventMode = 'static'; // PixiJS v7: makes it interactive
-                highlightGraphic.cursor = 'pointer'; // Show pointer cursor on hover
+            for (const matchIndex of lineMatches) {
+                const match = searchMatches[matchIndex];
+                if (!match) continue;
+
+                const { startChar, endChar, lineText } = match;
+
+                visibleMatchIndices.add(matchIndex);
+
+                // Calculate position of the match within the line
+                const beforeMatch = lineText.substring(0, startChar);
+                const matchText = lineText.substring(startChar, endChar);
                 
-                // Store match index for click handler
-                highlightGraphic.matchIndex = matchIndex;
+                // Approximate character positions (monospace font)
+                const beforeWidth = beforeMatch.length * config.charWidth;
+                const matchWidth = matchText.length * config.charWidth;
                 
-                // Add click handler to zoom and center on this match
-                highlightGraphic.on('pointerdown', () => {
-                    jumpToMatchAndZoom(matchIndex);
-                });
+                // Apply padding to make highlights larger at low zoom
+                const x = textSprite.x + beforeWidth - padding;
+                const y = textSprite.y - padding;
+                const width = matchWidth + padding * 2;
+                const height = config.lineHeight + padding * 2;
                 
-                container.addChild(highlightGraphic);
-                highlightSprites.set(matchIndex, highlightGraphic);
+                // Get or create a Graphics object for this highlight
+                let highlightGraphic = highlightSprites.get(matchIndex);
+                if (!highlightGraphic) {
+                    highlightGraphic = new Graphics();
+                    highlightGraphic.eventMode = 'static'; // PixiJS v7: makes it interactive
+                    highlightGraphic.cursor = 'pointer'; // Show pointer cursor on hover
+                    
+                    // Store match index for click handler
+                    highlightGraphic.matchIndex = matchIndex;
+                    
+                    // Add click handler to zoom and center on this match
+                    highlightGraphic.on('pointerdown', () => {
+                        jumpToMatchAndZoom(matchIndex);
+                    });
+                    
+                    container.addChild(highlightGraphic);
+                    highlightSprites.set(matchIndex, highlightGraphic);
+                }
+                
+                // Update the highlight graphics
+                highlightGraphic.clear();
+                highlightGraphic.x = x;
+                highlightGraphic.y = y;
+                
+                // Draw fill
+                highlightGraphic.beginFill(fillColor, fillOpacity);
+                highlightGraphic.drawRect(0, 0, width, height);
+                highlightGraphic.endFill();
+                
+                // Draw border
+                highlightGraphic.lineStyle(borderWidth, borderColor, 1.0);
+                highlightGraphic.drawRect(0, 0, width, height);
+                highlightGraphic.lineStyle(0);
+                
+                // Also draw to the main highlightGraphics for backward compatibility
+                highlightGraphics.beginFill(fillColor, fillOpacity);
+                highlightGraphics.drawRect(x, y, width, height);
+                highlightGraphics.endFill();
+                highlightGraphics.lineStyle(borderWidth, borderColor, 1.0);
+                highlightGraphics.drawRect(x, y, width, height);
+                highlightGraphics.lineStyle(0);
             }
-            
-            // Update the highlight graphics
-            highlightGraphic.clear();
-            highlightGraphic.x = x;
-            highlightGraphic.y = y;
-            
-            // Draw fill
-            highlightGraphic.beginFill(fillColor, fillOpacity);
-            highlightGraphic.drawRect(0, 0, width, height);
-            highlightGraphic.endFill();
-            
-            // Draw border
-            highlightGraphic.lineStyle(borderWidth, borderColor, 1.0);
-            highlightGraphic.drawRect(0, 0, width, height);
-            highlightGraphic.lineStyle(0);
-            
-            // Also draw to the main highlightGraphics for backward compatibility
-            highlightGraphics.beginFill(fillColor, fillOpacity);
-            highlightGraphics.drawRect(x, y, width, height);
-            highlightGraphics.endFill();
-            highlightGraphics.lineStyle(borderWidth, borderColor, 1.0);
-            highlightGraphics.drawRect(x, y, width, height);
-            highlightGraphics.lineStyle(0);
-        });
+        }
         
         // Remove highlight sprites that are no longer visible
         highlightSprites.forEach((graphic, matchIndex) => {
@@ -543,41 +479,19 @@ export async function createVisualization(text, app, progressCallback = null) {
         const match = searchMatches[matchIndex];
         const { lineIndex, startChar, lineText } = match;
         
-        // Determine which column this line is in (6 columns)
-        let columnIndex = 0;
-        let columnLineIndex = lineIndex;
-        if (lineIndex >= linesPerColumn * 5) {
-            columnIndex = 5;
-            columnLineIndex = lineIndex - linesPerColumn * 5;
-        } else if (lineIndex >= linesPerColumn * 4) {
-            columnIndex = 4;
-            columnLineIndex = lineIndex - linesPerColumn * 4;
-        } else if (lineIndex >= linesPerColumn * 3) {
-            columnIndex = 3;
-            columnLineIndex = lineIndex - linesPerColumn * 3;
-        } else if (lineIndex >= linesPerColumn * 2) {
-            columnIndex = 2;
-            columnLineIndex = lineIndex - linesPerColumn * 2;
-        } else if (lineIndex >= linesPerColumn) {
-            columnIndex = 1;
-            columnLineIndex = lineIndex - linesPerColumn;
-        }
+        // Determine which column this line is in
+        const columnIndex = Math.min(Math.floor(lineIndex / linesPerColumn), numColumns - 1);
+        const columnLineIndex = lineIndex - (columnIndex * linesPerColumn);
         
         // Calculate position of the match in world coordinates
         const columnWidth = config.lineWidth * config.charWidth;
-        const column1X = config.padding;
-        const column2X = column1X + columnWidth + config.columnGap;
-        const column3X = column2X + columnWidth + config.columnGap;
-        const column4X = column3X + columnWidth + config.columnGap;
-        const column5X = column4X + columnWidth + config.columnGap;
-        const column6X = column5X + columnWidth + config.columnGap;
-        const columnXPositions = [column1X, column2X, column3X, column4X, column5X, column6X];
+        const matchColumnX = config.padding + columnIndex * (columnWidth + config.columnGap);
         
         const beforeMatch = lineText.substring(0, startChar);
         const beforeWidth = beforeMatch.length * config.charWidth;
         
         // World coordinates of the match (before zoom/transform)
-        const matchWorldX = columnXPositions[columnIndex] + beforeWidth;
+        const matchWorldX = matchColumnX + beforeWidth;
         const matchWorldY = config.padding + columnLineIndex * config.lineHeight;
         
         // Calculate center of screen in world coordinates for zoom focal point
@@ -619,10 +533,11 @@ export async function createVisualization(text, app, progressCallback = null) {
 
     function performSearch(term) {
         searchMatches = [];
+        matchesByLine.clear();
         searchResultCount = 0;
         currentMatchIndex = -1; // Reset match index when searching
 
-        if (!term || term.length === 0 || term.length < 2) {
+        if (!term || term.length < 3) {
             updateHighlights();
             return;
         }
@@ -640,6 +555,14 @@ export async function createVisualization(text, app, progressCallback = null) {
                     lineText: line,
                 });
                 searchResultCount++;
+
+                const matchIndex = searchMatches.length - 1;
+                let lineMatches = matchesByLine.get(lineIndex);
+                if (!lineMatches) {
+                    lineMatches = [];
+                    matchesByLine.set(lineIndex, lineMatches);
+                }
+                lineMatches.push(matchIndex);
             }
         });
 
@@ -654,41 +577,19 @@ export async function createVisualization(text, app, progressCallback = null) {
         const match = searchMatches[matchIndex];
         const { lineIndex, startChar, lineText } = match;
         
-        // Determine which column this line is in (6 columns)
-        let columnIndex = 0;
-        let columnLineIndex = lineIndex;
-        if (lineIndex >= linesPerColumn * 5) {
-            columnIndex = 5;
-            columnLineIndex = lineIndex - linesPerColumn * 5;
-        } else if (lineIndex >= linesPerColumn * 4) {
-            columnIndex = 4;
-            columnLineIndex = lineIndex - linesPerColumn * 4;
-        } else if (lineIndex >= linesPerColumn * 3) {
-            columnIndex = 3;
-            columnLineIndex = lineIndex - linesPerColumn * 3;
-        } else if (lineIndex >= linesPerColumn * 2) {
-            columnIndex = 2;
-            columnLineIndex = lineIndex - linesPerColumn * 2;
-        } else if (lineIndex >= linesPerColumn) {
-            columnIndex = 1;
-            columnLineIndex = lineIndex - linesPerColumn;
-        }
+        // Determine which column this line is in
+        const columnIndex = Math.min(Math.floor(lineIndex / linesPerColumn), numColumns - 1);
+        const columnLineIndex = lineIndex - (columnIndex * linesPerColumn);
         
         // Calculate position of the match in world coordinates
         const columnWidth = config.lineWidth * config.charWidth;
-        const column1X = config.padding;
-        const column2X = column1X + columnWidth + config.columnGap;
-        const column3X = column2X + columnWidth + config.columnGap;
-        const column4X = column3X + columnWidth + config.columnGap;
-        const column5X = column4X + columnWidth + config.columnGap;
-        const column6X = column5X + columnWidth + config.columnGap;
-        const columnXPositions = [column1X, column2X, column3X, column4X, column5X, column6X];
+        const matchColumnX = config.padding + columnIndex * (columnWidth + config.columnGap);
         
         const beforeMatch = lineText.substring(0, startChar);
         const beforeWidth = beforeMatch.length * config.charWidth;
         
         // World coordinates of the match (before zoom/transform)
-        const matchWorldX = columnXPositions[columnIndex] + beforeWidth;
+        const matchWorldX = matchColumnX + beforeWidth;
         const matchWorldY = config.padding + columnLineIndex * config.lineHeight;
         
         // Calculate what the screen position would be with current zoom
@@ -716,20 +617,20 @@ export async function createVisualization(text, app, progressCallback = null) {
         
         // Move to next match, wrapping around
         currentMatchIndex = (currentMatchIndex + 1) % searchMatches.length;
-        return jumpToMatch(currentMatchIndex);
+        return jumpToMatchAndZoom(currentMatchIndex);
     }
 
     // Initial render with viewport culling - show content immediately
+    renderBookBackgrounds();
     renderVisibleText();
     console.log('Text rendering optimized with viewport culling');
     
     // Force immediate render to show content right away
     app.renderer.render(app.stage);
 
-    // Calculate total dimensions (two columns side by side)
-    const columnWidth = config.lineWidth * config.charWidth;
-    const totalWidth = columnWidth * 6 + config.columnGap * 5 + config.padding * 2;
-    const totalHeight = Math.max(column1Lines.length, column2Lines.length, column3Lines.length, column4Lines.length, column5Lines.length, column6Lines.length) * config.lineHeight + config.padding * 2;
+    // Calculate total dimensions (columnWidth already computed above)
+    const totalWidth = columnWidth * numColumns + config.columnGap * (numColumns - 1) + config.padding * 2;
+    const totalHeight = maxColumnLength * config.lineHeight + config.padding * 2;
     console.log('Total dimensions:', totalWidth, 'x', totalHeight);
 
     // Calculate initial zoom to fit everything
@@ -758,20 +659,33 @@ export async function createVisualization(text, app, progressCallback = null) {
     container.y = offsetY;
 
     // Update transform and viewport with throttling
-    let lastViewportHash = '';
-    let frameCount = 0;
+    let lastOffsetX = offsetX;
+    let lastOffsetY = offsetY;
+    let lastZoom = zoom;
+    let needsRender = true;
     
     function updateTransform() {
         container.scale.set(zoom);
         container.x = offsetX;
         container.y = offsetY;
         
-        // Throttle viewport updates - only update every few frames and when viewport changes
-        frameCount++;
-        const viewportHash = `${Math.floor(offsetX / 50)}_${Math.floor(offsetY / 50)}_${zoom.toFixed(2)}`;
+        // Check if viewport actually changed (faster than string comparison)
+        const offsetChanged = Math.abs(offsetX - lastOffsetX) > 25 || Math.abs(offsetY - lastOffsetY) > 25;
+        const zoomChanged = Math.abs(zoom - lastZoom) > 0.001;
         
-        if (viewportHash !== lastViewportHash && frameCount % 2 === 0) {
-            lastViewportHash = viewportHash;
+        const nextResolution = getTextResolutionForZoom();
+        const resolutionChanged = nextResolution !== currentTextResolution;
+        if (resolutionChanged) {
+            currentTextResolution = nextResolution;
+        }
+        
+        if (offsetChanged || zoomChanged || resolutionChanged || needsRender) {
+            lastOffsetX = offsetX;
+            lastOffsetY = offsetY;
+            lastZoom = zoom;
+            needsRender = false;
+            
+            renderBookBackgrounds();
             renderVisibleText();
             if (searchMatches.length > 0) {
                 updateHighlights();

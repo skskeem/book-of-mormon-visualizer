@@ -95,6 +95,52 @@
             width: 100%;
             height: 100%;
         }
+
+        #book-legend {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            z-index: 1000;
+            background: rgba(0, 0, 0, 0.85);
+            padding: 15px;
+            border-radius: 8px;
+            backdrop-filter: blur(10px);
+            max-height: 60vh;
+            overflow-y: auto;
+            font-size: 12px;
+        }
+
+        #book-legend h3 {
+            color: #fff;
+            margin: 0 0 10px 0;
+            font-size: 14px;
+            border-bottom: 1px solid #444;
+            padding-bottom: 8px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 5px 0;
+            color: #ddd;
+        }
+
+        .legend-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 3px;
+            margin-right: 8px;
+            flex-shrink: 0;
+        }
+
+        #toggle-legend {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            z-index: 999;
+            padding: 8px 12px;
+            font-size: 12px;
+        }
     </style>
 </head>
 <body>
@@ -111,6 +157,24 @@
                 <button id="reset-zoom">Reset</button>
                 <span id="zoom-level">100%</span>
             </div>
+        </div>
+        <div id="book-legend">
+            <h3>📖 Books</h3>
+            <div class="legend-item"><div class="legend-color" style="background: #3B82F6;"></div>1 Nephi</div>
+            <div class="legend-item"><div class="legend-color" style="background: #8B5CF6;"></div>2 Nephi</div>
+            <div class="legend-item"><div class="legend-color" style="background: #EC4899;"></div>Jacob</div>
+            <div class="legend-item"><div class="legend-color" style="background: #F97316;"></div>Enos</div>
+            <div class="legend-item"><div class="legend-color" style="background: #FB923C;"></div>Jarom</div>
+            <div class="legend-item"><div class="legend-color" style="background: #FBBF24;"></div>Omni</div>
+            <div class="legend-item"><div class="legend-color" style="background: #A3E635;"></div>Words of Mormon</div>
+            <div class="legend-item"><div class="legend-color" style="background: #10B981;"></div>Mosiah</div>
+            <div class="legend-item"><div class="legend-color" style="background: #EF4444;"></div>Alma</div>
+            <div class="legend-item"><div class="legend-color" style="background: #F59E0B;"></div>Helaman</div>
+            <div class="legend-item"><div class="legend-color" style="background: #06B6D4;"></div>3 Nephi</div>
+            <div class="legend-item"><div class="legend-color" style="background: #84CC16;"></div>4 Nephi</div>
+            <div class="legend-item"><div class="legend-color" style="background: #6366F1;"></div>Mormon</div>
+            <div class="legend-item"><div class="legend-color" style="background: #14B8A6;"></div>Ether</div>
+            <div class="legend-item"><div class="legend-color" style="background: #A855F7;"></div>Moroni</div>
         </div>
         <div id="canvas-container"></div>
     </div>
