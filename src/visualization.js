@@ -6,13 +6,14 @@ export function createVisualization(text, app) {
 
     // Configuration
     const config = {
-        fontSize: 12,
-        lineHeight: 18,
-        charWidth: 7,
-        padding: 20,
+        fontSize: 10,
+        lineHeight: 14,
+        charWidth: 6,
+        padding: 10,
         highlightColor: 0xffff00,
         textColor: 0xffffff,
         backgroundColor: 0x1a1a1a,
+        columns: 3, // Number of columns for better layout
     };
 
     let zoom = 1;
@@ -20,14 +21,19 @@ export function createVisualization(text, app) {
     let offsetY = 0;
     let searchMatches = [];
     let searchResultCount = 0;
+    let initialZoom = 1;
 
     // Split text into words for better layout
     const words = text.split(/\s+/);
     const lines = [];
-    let currentLine = '';
-    const maxCharsPerLine = Math.floor((window.innerWidth - config.padding * 2) / config.charWidth);
+    
+    // Calculate optimal line width for multi-column layout
+    const columnWidth = Math.floor((app.screen.width - config.padding * (config.columns + 1)) / config.columns);
+    const maxCharsPerLine = Math.floor(columnWidth / config.charWidth);
+    const linesPerColumn = Math.ceil(words.length / (maxCharsPerLine * 10)); // Rough estimate
 
     // Create lines of text
+    let currentLine = '';
     for (const word of words) {
         if ((currentLine + ' ' + word).length > maxCharsPerLine && currentLine.length > 0) {
             lines.push(currentLine);
@@ -54,19 +60,28 @@ export function createVisualization(text, app) {
         });
         textSprites.length = 0;
 
-        // Create text sprites for each line
+        // Calculate column layout
+        const linesPerColumn = Math.ceil(lines.length / config.columns);
+        const columnWidth = (app.screen.width - config.padding * (config.columns + 1)) / config.columns;
+
+        // Create text sprites for each line in columns
         lines.forEach((line, lineIndex) => {
+            const columnIndex = Math.floor(lineIndex / linesPerColumn);
+            const lineInColumn = lineIndex % linesPerColumn;
+            
             const textSprite = new Text({
                 text: line,
                 style: {
                     fontFamily: 'monospace',
                     fontSize: config.fontSize,
                     fill: config.textColor,
+                    wordWrap: true,
+                    wordWrapWidth: columnWidth - 10,
                 },
             });
             
-            textSprite.x = config.padding;
-            textSprite.y = config.padding + lineIndex * config.lineHeight;
+            textSprite.x = config.padding + columnIndex * (columnWidth + config.padding);
+            textSprite.y = config.padding + lineInColumn * config.lineHeight;
             
             container.addChild(textSprite);
             textSprites.push(textSprite);
@@ -139,12 +154,20 @@ export function createVisualization(text, app) {
     renderText();
 
     // Calculate total dimensions
-    const totalWidth = Math.max(...lines.map(line => line.length * config.charWidth)) + config.padding * 2;
-    const totalHeight = lines.length * config.lineHeight + config.padding * 2;
+    const linesPerColumn = Math.ceil(lines.length / config.columns);
+    const columnWidth = (app.screen.width - config.padding * (config.columns + 1)) / config.columns;
+    const totalWidth = config.columns * columnWidth + config.padding * (config.columns + 1);
+    const totalHeight = linesPerColumn * config.lineHeight + config.padding * 2;
+
+    // Calculate initial zoom to fit everything
+    const scaleX = app.screen.width / totalWidth;
+    const scaleY = app.screen.height / totalHeight;
+    initialZoom = Math.min(scaleX, scaleY) * 0.95; // 95% to leave some margin
+    zoom = initialZoom;
 
     // Center the view initially
-    offsetX = (app.screen.width - totalWidth) / 2;
-    offsetY = (app.screen.height - totalHeight) / 2;
+    offsetX = (app.screen.width - totalWidth * zoom) / 2;
+    offsetY = (app.screen.height - totalHeight * zoom) / 2;
     container.x = offsetX;
     container.y = offsetY;
 
@@ -161,6 +184,10 @@ export function createVisualization(text, app) {
         setZoom(newZoom) {
             zoom = newZoom;
             updateTransform();
+        },
+
+        getInitialZoom() {
+            return initialZoom;
         },
 
         pan(dx, dy) {
@@ -184,7 +211,15 @@ export function createVisualization(text, app) {
         },
 
         handleResize() {
-            // Optionally adjust layout on resize
+            // Recalculate layout on resize
+            renderText();
+            const scaleX = app.screen.width / totalWidth;
+            const scaleY = app.screen.height / totalHeight;
+            const newInitialZoom = Math.min(scaleX, scaleY) * 0.95;
+            if (zoom === initialZoom) {
+                zoom = newInitialZoom;
+            }
+            initialZoom = newInitialZoom;
             this.resetView();
         },
     };

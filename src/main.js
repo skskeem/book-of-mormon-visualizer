@@ -5,7 +5,7 @@ import { createVisualization } from './visualization.js';
 let app;
 let visualization;
 let searchTerm = '';
-let zoomLevel = 1;
+let zoomLevel = 0.01; // Will be set to initial zoom after visualization is created
 
 async function init() {
     // Create PixiJS application
@@ -26,6 +26,10 @@ async function init() {
     
     // Create visualization
     visualization = createVisualization(text, app);
+    
+    // Set initial zoom level
+    zoomLevel = visualization.getInitialZoom();
+    document.getElementById('zoom-level').textContent = `${Math.round(zoomLevel * 100)}%`;
     
     // Setup controls
     setupControls();
@@ -81,11 +85,12 @@ function setupControls() {
     });
 
     resetZoomBtn.addEventListener('click', () => {
-        zoomLevel = 1;
         if (visualization) {
+            const initialZoom = visualization.getInitialZoom();
+            zoomLevel = initialZoom;
             visualization.setZoom(zoomLevel);
             visualization.resetView();
-            zoomLevelDisplay.textContent = '100%';
+            zoomLevelDisplay.textContent = `${Math.round(zoomLevel * 100)}%`;
         }
     });
 
