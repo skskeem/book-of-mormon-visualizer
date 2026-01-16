@@ -702,7 +702,8 @@ export async function createVisualization(text, app, progressCallback = null, bo
         }
     }
 
-    app.ticker.add(updateTransform);
+    // Initial transform update (no ticker - render on demand only)
+    updateTransform();
 
     return {
         setZoom(newZoom, focalPointX = null, focalPointY = null) {
@@ -776,9 +777,6 @@ export async function createVisualization(text, app, progressCallback = null, bo
         },
 
         destroy() {
-            // Remove ticker callback
-            app.ticker.remove(updateTransform);
-            
             // Clear all children and remove container from stage
             container.removeChildren();
             if (container.parent) {
