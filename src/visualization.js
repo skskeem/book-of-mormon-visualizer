@@ -94,9 +94,18 @@ export async function createVisualization(text, app, progressCallback = null, bo
 
     console.log('Created', lines.length, 'wrapped lines from', verses.length, 'verses');
 
-    // Split lines into eight columns
-    const numColumns = 8;
+    // Calculate columns dynamically based on content
+    // Set a minimum column height so small books don't spread too thin
+    const MIN_LINES_PER_COLUMN = 300; // Minimum lines before flowing to next column
+    const MAX_COLUMNS = 8;
+    
+    // Calculate how many columns we actually need
+    const neededColumns = Math.ceil(lines.length / MIN_LINES_PER_COLUMN);
+    const numColumns = Math.min(Math.max(1, neededColumns), MAX_COLUMNS);
     const linesPerColumn = Math.ceil(lines.length / numColumns);
+    
+    console.log(`Using ${numColumns} columns with ~${linesPerColumn} lines each`);
+    
     const columnLines = [];
     for (let i = 0; i < numColumns; i++) {
         columnLines.push(lines.slice(linesPerColumn * i, linesPerColumn * (i + 1)));
@@ -764,6 +773,24 @@ export async function createVisualization(text, app, progressCallback = null, bo
             }
             initialZoom = newInitialZoom;
             this.resetView();
+        },
+
+        destroy() {
+            // Remove ticker callback
+            app.ticker.remove(updateTransform);
+            
+            // Clear all children and remove container from stage
+            container.removeChildren();
+            if (container.parent) {
+                container.parent.removeChild(container);
+            }
+            container.destroy({ children: true, texture: true, baseTexture: true });
+            
+            // Clear data structures
+            searchMatches.length = 0;
+            matchesByLine.clear();
+            lines.length = 0;
+            verseStartLines.length = 0;
         },
     };
 }

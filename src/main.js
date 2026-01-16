@@ -1,11 +1,102 @@
 import { Application, Graphics, Text, Container } from 'pixi.js';
-import { loadBookOfMormon } from './loadText.js';
+import { loadBookOfMormon, BOOK_DEFINITIONS } from './loadText.js';
 import { createVisualization } from './visualization.js';
 
 let app;
 let visualization;
 let searchTerm = '';
 let zoomLevel = 0.01; // Will be set to initial zoom after visualization is created
+let currentBookFilter = -1; // -1 means all books
+
+async function loadAndCreateVisualization(filterBookIndex = -1) {
+    // Show loading indicator with progress
+    let loadingIndicator = document.getElementById('loading-indicator');
+    if (!loadingIndicator) {
+        loadingIndicator = document.createElement('div');
+        loadingIndicator.id = 'loading-indicator';
+        loadingIndicator.style.cssText = `
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 30px 50px;
+            border-radius: 8px;
+            z-index: 10000;
+            font-size: 18px;
+            text-align: center;
+            min-width: 200px;
+        `;
+        const loadingText = document.createElement('div');
+        loadingText.id = 'loading-text';
+        loadingText.textContent = 'Loading text...';
+        loadingIndicator.appendChild(loadingText);
+        document.body.appendChild(loadingIndicator);
+    } else {
+        loadingIndicator.style.display = 'block';
+    }
+    
+    const loadingText = document.getElementById('loading-text');
+    const updateLoadingText = (text) => {
+        if (loadingText) loadingText.textContent = text;
+    };
+
+    // Destroy previous visualization if exists
+    if (visualization) {
+        visualization.destroy();
+        visualization = null;
+    }
+
+    // Load Book of Mormon text with filter
+    updateLoadingText(filterBookIndex >= 0 ? `Loading ${BOOK_DEFINITIONS[filterBookIndex].name}...` : 'Loading text file...');
+    const loadStart = performance.now();
+    const { text, bookMarkers } = await loadBookOfMormon(filterBookIndex);
+    const loadTime = performance.now() - loadStart;
+    console.log(`Text loaded in ${loadTime.toFixed(2)}ms, length:`, text.length);
+    console.log(`Found ${bookMarkers.length} book markers`);
+    
+    if (!text || text.length === 0) {
+        console.error('No text loaded!');
+        loadingIndicator.style.display = 'none';
+        return null;
+    }
+    
+    // Update loading message
+    updateLoadingText('Processing text...');
+    
+    // Create visualization (now async) - pass progress callback and book markers
+    const processStart = performance.now();
+    visualization = await createVisualization(text, app, updateLoadingText, bookMarkers);
+    const processTime = performance.now() - processStart;
+    console.log(`Visualization created in ${processTime.toFixed(2)}ms`);
+    
+    // Remove loading indicator - content should already be visible
+    loadingIndicator.style.display = 'none';
+    
+    // Set initial zoom level
+    zoomLevel = visualization.getInitialZoom();
+    console.log('Initial zoom level:', zoomLevel);
+    document.getElementById('zoom-level').textContent = `${Math.round(zoomLevel * 100)}%`;
+    
+    // Update book legend visibility based on filter
+    updateBookLegendVisibility(filterBookIndex);
+    
+    return visualization;
+}
+
+function updateBookLegendVisibility(filterBookIndex) {
+    const legendItems = document.querySelectorAll('.legend-item');
+    legendItems.forEach((item, index) => {
+        if (filterBookIndex < 0) {
+            // Show all legend items
+            item.style.display = 'flex';
+        } else {
+            // Only show the selected book's legend item
+            item.style.display = index === filterBookIndex ? 'flex' : 'none';
+        }
+    });
+}
 
 async function init() {
     try {
@@ -35,62 +126,8 @@ async function init() {
         canvas.style.width = '100%';
         canvas.style.height = '100%';
 
-        // Show loading indicator with progress
-        const loadingIndicator = document.createElement('div');
-        loadingIndicator.id = 'loading-indicator';
-        loadingIndicator.style.cssText = `
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: rgba(0, 0, 0, 0.9);
-            color: white;
-            padding: 30px 50px;
-            border-radius: 8px;
-            z-index: 10000;
-            font-size: 18px;
-            text-align: center;
-            min-width: 200px;
-        `;
-        const loadingText = document.createElement('div');
-        loadingText.textContent = 'Loading text...';
-        loadingIndicator.appendChild(loadingText);
-        document.body.appendChild(loadingIndicator);
-        
-        const updateLoadingText = (text) => {
-            loadingText.textContent = text;
-        };
-
-        // Load Book of Mormon text
-        updateLoadingText('Loading text file...');
-        const loadStart = performance.now();
-        const { text, bookMarkers } = await loadBookOfMormon();
-        const loadTime = performance.now() - loadStart;
-        console.log(`Text loaded in ${loadTime.toFixed(2)}ms, length:`, text.length);
-        console.log(`Found ${bookMarkers.length} book markers`);
-        
-        if (!text || text.length === 0) {
-            console.error('No text loaded!');
-            loadingIndicator.remove();
-            return;
-        }
-        
-        // Update loading message
-        updateLoadingText('Processing text...');
-        
-        // Create visualization (now async) - pass progress callback and book markers
-        const processStart = performance.now();
-        visualization = await createVisualization(text, app, updateLoadingText, bookMarkers);
-        const processTime = performance.now() - processStart;
-        console.log(`Visualization created in ${processTime.toFixed(2)}ms`);
-        
-        // Remove loading indicator - content should already be visible
-        loadingIndicator.remove();
-        
-        // Set initial zoom level
-        zoomLevel = visualization.getInitialZoom();
-        console.log('Initial zoom level:', zoomLevel);
-        document.getElementById('zoom-level').textContent = `${Math.round(zoomLevel * 100)}%`;
+        // Load and create visualization
+        await loadAndCreateVisualization(currentBookFilter);
         
         // Setup controls
         setupControls();
@@ -122,6 +159,22 @@ function setupControls() {
     const zoomLevelDisplay = document.getElementById('zoom-level');
     const searchResults = document.getElementById('search-results');
     const nextMatchBtn = document.getElementById('next-match');
+    const bookFilter = document.getElementById('book-filter');
+
+    // Book filter functionality
+    bookFilter.addEventListener('change', async (e) => {
+        const selectedValue = parseInt(e.target.value, 10);
+        currentBookFilter = selectedValue;
+        
+        // Clear search when changing books
+        searchInput.value = '';
+        searchTerm = '';
+        searchResults.textContent = '';
+        nextMatchBtn.disabled = true;
+        
+        // Reload visualization with new filter
+        await loadAndCreateVisualization(currentBookFilter);
+    });
 
     // Search functionality
     searchInput.addEventListener('input', (e) => {

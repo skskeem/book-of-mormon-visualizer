@@ -22,7 +22,8 @@ export const BOOK_DEFINITIONS = [
 const VERSE_PATTERN = /^(1 Nephi|2 Nephi|3 Nephi|4 Nephi|Jacob|Enos|Jarom|Omni|Words of Mormon|Mosiah|Alma|Helaman|Mormon|Ether|Moroni) \d+:\d+/;
 
 // Load and parse the Book of Mormon text file
-export async function loadBookOfMormon() {
+// filterBookIndex: if >= 0, only load verses from that specific book
+export async function loadBookOfMormon(filterBookIndex = -1) {
     try {
         const response = await fetch('/bom.txt');
         const text = await response.text();
@@ -35,6 +36,7 @@ export async function loadBookOfMormon() {
         
         let currentBook = -1;
         let currentVerse = '';
+        let shouldIncludeVerse = filterBookIndex < 0; // If no filter, include all
         
         // Single pass: find start, join lines into verses, track books
         for (let i = 0; i < lines.length; i++) {
@@ -50,8 +52,8 @@ export async function loadBookOfMormon() {
             if (foundStart && line.length > 0 && !line.startsWith('***') && !line.startsWith('[')) {
                 // Check if this line starts a new verse
                 if (VERSE_PATTERN.test(line)) {
-                    // Save the previous verse if it exists
-                    if (currentVerse.length > 0) {
+                    // Save the previous verse if it exists and matches filter
+                    if (currentVerse.length > 0 && shouldIncludeVerse) {
                         verses.push(currentVerse);
                     }
                     
@@ -60,10 +62,15 @@ export async function loadBookOfMormon() {
                         if (BOOK_DEFINITIONS[bookIdx].pattern.test(line)) {
                             if (bookIdx !== currentBook) {
                                 currentBook = bookIdx;
-                                bookMarkers.push({
-                                    bookIndex: bookIdx,
-                                    lineIndex: verses.length  // Will be the index of this new verse
-                                });
+                                // Update whether we should include verses
+                                shouldIncludeVerse = filterBookIndex < 0 || bookIdx === filterBookIndex;
+                                
+                                if (shouldIncludeVerse) {
+                                    bookMarkers.push({
+                                        bookIndex: bookIdx,
+                                        lineIndex: verses.length  // Will be the index of this new verse
+                                    });
+                                }
                             }
                             break;
                         }
@@ -83,11 +90,11 @@ export async function loadBookOfMormon() {
         }
         
         // Don't forget the last verse
-        if (currentVerse.length > 0) {
+        if (currentVerse.length > 0 && shouldIncludeVerse) {
             verses.push(currentVerse);
         }
         
-        console.log(`Parsed ${verses.length} verses`);
+        console.log(`Parsed ${verses.length} verses${filterBookIndex >= 0 ? ` (filtered to ${BOOK_DEFINITIONS[filterBookIndex]?.name})` : ''}`);
         
         return {
             text: verses.join('\n'),
