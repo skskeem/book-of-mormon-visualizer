@@ -6,14 +6,14 @@ export function createVisualization(text, app) {
 
     // Configuration
     const config = {
-        fontSize: 10,
-        lineHeight: 14,
-        charWidth: 6,
-        padding: 10,
+        fontSize: 8,
+        lineHeight: 10,
+        charWidth: 4.8,
+        padding: 20,
         highlightColor: 0xffff00,
         textColor: 0xffffff,
         backgroundColor: 0x1a1a1a,
-        columns: 3, // Number of columns for better layout
+        lineWidth: 120, // Characters per line for optimal viewing
     };
 
     let zoom = 1;
@@ -23,23 +23,19 @@ export function createVisualization(text, app) {
     let searchResultCount = 0;
     let initialZoom = 1;
 
-    // Split text into words for better layout
+    // Split text into words and create lines
     const words = text.split(/\s+/);
     const lines = [];
-    
-    // Calculate optimal line width for multi-column layout
-    const columnWidth = Math.floor((app.screen.width - config.padding * (config.columns + 1)) / config.columns);
-    const maxCharsPerLine = Math.floor(columnWidth / config.charWidth);
-    const linesPerColumn = Math.ceil(words.length / (maxCharsPerLine * 10)); // Rough estimate
-
-    // Create lines of text
     let currentLine = '';
+
+    // Create lines of text with optimal width
     for (const word of words) {
-        if ((currentLine + ' ' + word).length > maxCharsPerLine && currentLine.length > 0) {
+        const testLine = currentLine ? currentLine + ' ' + word : word;
+        if (testLine.length > config.lineWidth && currentLine.length > 0) {
             lines.push(currentLine);
             currentLine = word;
         } else {
-            currentLine = currentLine ? currentLine + ' ' + word : word;
+            currentLine = testLine;
         }
     }
     if (currentLine) {
@@ -60,28 +56,19 @@ export function createVisualization(text, app) {
         });
         textSprites.length = 0;
 
-        // Calculate column layout
-        const linesPerColumn = Math.ceil(lines.length / config.columns);
-        const columnWidth = (app.screen.width - config.padding * (config.columns + 1)) / config.columns;
-
-        // Create text sprites for each line in columns
+        // Create text sprites for each line
         lines.forEach((line, lineIndex) => {
-            const columnIndex = Math.floor(lineIndex / linesPerColumn);
-            const lineInColumn = lineIndex % linesPerColumn;
-            
             const textSprite = new Text({
                 text: line,
                 style: {
                     fontFamily: 'monospace',
                     fontSize: config.fontSize,
                     fill: config.textColor,
-                    wordWrap: true,
-                    wordWrapWidth: columnWidth - 10,
                 },
             });
             
-            textSprite.x = config.padding + columnIndex * (columnWidth + config.padding);
-            textSprite.y = config.padding + lineInColumn * config.lineHeight;
+            textSprite.x = config.padding;
+            textSprite.y = config.padding + lineIndex * config.lineHeight;
             
             container.addChild(textSprite);
             textSprites.push(textSprite);
@@ -154,10 +141,8 @@ export function createVisualization(text, app) {
     renderText();
 
     // Calculate total dimensions
-    const linesPerColumn = Math.ceil(lines.length / config.columns);
-    const columnWidth = (app.screen.width - config.padding * (config.columns + 1)) / config.columns;
-    const totalWidth = config.columns * columnWidth + config.padding * (config.columns + 1);
-    const totalHeight = linesPerColumn * config.lineHeight + config.padding * 2;
+    const totalWidth = config.lineWidth * config.charWidth + config.padding * 2;
+    const totalHeight = lines.length * config.lineHeight + config.padding * 2;
 
     // Calculate initial zoom to fit everything
     const scaleX = app.screen.width / totalWidth;
@@ -211,12 +196,11 @@ export function createVisualization(text, app) {
         },
 
         handleResize() {
-            // Recalculate layout on resize
-            renderText();
+            // Recalculate zoom on resize
             const scaleX = app.screen.width / totalWidth;
             const scaleY = app.screen.height / totalHeight;
             const newInitialZoom = Math.min(scaleX, scaleY) * 0.95;
-            if (zoom === initialZoom) {
+            if (Math.abs(zoom - initialZoom) < 0.001) {
                 zoom = newInitialZoom;
             }
             initialZoom = newInitialZoom;
