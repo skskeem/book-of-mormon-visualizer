@@ -50,9 +50,12 @@ export async function createVisualization(text, app, progressCallback = null, bo
         
         for (let v = batchStart; v < batchEnd; v++) {
             const verse = verses[v];
-            if (verse.length === 0) continue;
             
+            // Always record the start line for this verse index (even if empty)
+            // This ensures bookMarkers.lineIndex maps correctly to verseStartLines
             verseStartLines.push(lines.length);
+            
+            if (verse.length === 0) continue;
             
             // Fast path: if verse fits in one line, no need to split
             if (verse.length <= lineWidth) {
