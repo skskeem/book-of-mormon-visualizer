@@ -4,26 +4,28 @@ export async function loadBookOfMormon() {
         const response = await fetch('/bom.txt');
         const text = await response.text();
         
-        // Parse the text - skip Project Gutenberg header
-        // The actual text starts around line 263 with "THE BOOK OF MORMON"
+        // Optimized single-pass parsing
         const lines = text.split('\n');
-        
-        // Find where the actual content starts (after Project Gutenberg header)
         let startIndex = 0;
+        let foundStart = false;
+        const cleanedLines = [];
+        
+        // Single pass: find start and clean in one loop
         for (let i = 0; i < lines.length; i++) {
-            if (lines[i].trim() === 'THE BOOK OF MORMON') {
+            const line = lines[i].trim();
+            
+            // Find start marker
+            if (!foundStart && line === 'THE BOOK OF MORMON') {
                 startIndex = i + 1;
-                break;
+                foundStart = true;
+                continue;
+            }
+            
+            // Only process after start is found
+            if (foundStart && line.length > 0 && !line.startsWith('***') && !line.startsWith('[')) {
+                cleanedLines.push(line);
             }
         }
-        
-        // Extract the actual text content
-        const contentLines = lines.slice(startIndex);
-        
-        // Clean up the text - remove empty lines and normalize
-        const cleanedLines = contentLines
-            .map(line => line.trim())
-            .filter(line => line.length > 0 && !line.startsWith('***') && !line.startsWith('['));
         
         return cleanedLines.join('\n');
     } catch (error) {

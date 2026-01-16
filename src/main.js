@@ -8,31 +8,101 @@ let searchTerm = '';
 let zoomLevel = 0.01; // Will be set to initial zoom after visualization is created
 
 async function init() {
-    // Create PixiJS application
-    app = new Application();
-    await app.init({
-        width: window.innerWidth,
-        height: window.innerHeight,
-        backgroundColor: 0x1a1a1a,
-        antialias: true,
-        resolution: window.devicePixelRatio || 1,
-        autoDensity: true,
-    });
+    try {
+        // Create PixiJS application - in v7, constructor accepts options directly
+        app = new Application({
+            width: window.innerWidth,
+            height: window.innerHeight,
+            backgroundColor: 0x1a1a1a,
+            antialias: true,
+            resolution: window.devicePixelRatio || 1, // Use device pixel ratio for optimal performance
+            autoDensity: true,
+        });
+        
+        // In PixiJS v7, the canvas is accessed via app.canvas or app.view
+        const canvas = app.canvas || app.view;
+        if (!canvas) {
+            console.error('Canvas not found on app object:', app);
+            return;
+        }
+        console.log('Canvas element:', canvas);
+        const container = document.getElementById('canvas-container');
+        container.appendChild(canvas);
+        console.log('Canvas added to DOM');
+        
+        // Ensure canvas is visible
+        canvas.style.display = 'block';
+        canvas.style.width = '100%';
+        canvas.style.height = '100%';
 
-    document.getElementById('canvas-container').appendChild(app.canvas);
+        // Show loading indicator with progress
+        const loadingIndicator = document.createElement('div');
+        loadingIndicator.id = 'loading-indicator';
+        loadingIndicator.style.cssText = `
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 30px 50px;
+            border-radius: 8px;
+            z-index: 10000;
+            font-size: 18px;
+            text-align: center;
+            min-width: 200px;
+        `;
+        const loadingText = document.createElement('div');
+        loadingText.textContent = 'Loading text...';
+        loadingIndicator.appendChild(loadingText);
+        document.body.appendChild(loadingIndicator);
+        
+        const updateLoadingText = (text) => {
+            loadingText.textContent = text;
+        };
 
-    // Load Book of Mormon text
-    const text = await loadBookOfMormon();
-    
-    // Create visualization
-    visualization = createVisualization(text, app);
-    
-    // Set initial zoom level
-    zoomLevel = visualization.getInitialZoom();
-    document.getElementById('zoom-level').textContent = `${Math.round(zoomLevel * 100)}%`;
-    
-    // Setup controls
-    setupControls();
+        // Load Book of Mormon text
+        updateLoadingText('Loading text file...');
+        const loadStart = performance.now();
+        const text = await loadBookOfMormon();
+        const loadTime = performance.now() - loadStart;
+        console.log(`Text loaded in ${loadTime.toFixed(2)}ms, length:`, text.length);
+        
+        if (!text || text.length === 0) {
+            console.error('No text loaded!');
+            loadingIndicator.remove();
+            return;
+        }
+        
+        // Update loading message
+        updateLoadingText('Processing text...');
+        
+        // Create visualization (now async) - pass progress callback
+        const processStart = performance.now();
+        visualization = await createVisualization(text, app, updateLoadingText);
+        const processTime = performance.now() - processStart;
+        console.log(`Visualization created in ${processTime.toFixed(2)}ms`);
+        
+        // Remove loading indicator - content should already be visible
+        loadingIndicator.remove();
+        
+        // Set initial zoom level
+        zoomLevel = visualization.getInitialZoom();
+        console.log('Initial zoom level:', zoomLevel);
+        document.getElementById('zoom-level').textContent = `${Math.round(zoomLevel * 100)}%`;
+        
+        // Setup controls
+        setupControls();
+        
+        // Listen for zoom changes from highlight clicks
+        window.addEventListener('visualization-zoom-changed', (e) => {
+            const newZoom = e.detail.zoom;
+            zoomLevel = newZoom;
+            document.getElementById('zoom-level').textContent = `${Math.round(zoomLevel * 100)}%`;
+        });
+    } catch (error) {
+        console.error('Error initializing application:', error);
+    }
     
     // Handle window resize
     window.addEventListener('resize', () => {
@@ -50,28 +120,55 @@ function setupControls() {
     const resetZoomBtn = document.getElementById('reset-zoom');
     const zoomLevelDisplay = document.getElementById('zoom-level');
     const searchResults = document.getElementById('search-results');
+    const nextMatchBtn = document.getElementById('next-match');
 
     // Search functionality
     searchInput.addEventListener('input', (e) => {
         searchTerm = e.target.value.trim();
         if (visualization) {
-            visualization.search(searchTerm);
-            const count = visualization.getSearchResultCount();
-            if (searchTerm) {
-                searchResults.textContent = count > 0 
-                    ? `Found ${count} match${count !== 1 ? 'es' : ''}`
-                    : 'No matches found';
+            // Only search if at least 2 characters have been entered
+            if (searchTerm.length >= 2) {
+                visualization.search(searchTerm);
+                const count = visualization.getSearchResultCount();
+                if (count > 0) {
+                    const currentIndex = visualization.getCurrentMatchIndex();
+                    if (currentIndex >= 0) {
+                        searchResults.textContent = `Match ${currentIndex + 1} of ${count}`;
+                    } else {
+                        searchResults.textContent = `Found ${count} match${count !== 1 ? 'es' : ''}`;
+                    }
+                } else {
+                    searchResults.textContent = 'No matches found';
+                }
+                // Update next match button state
+                nextMatchBtn.disabled = count === 0;
             } else {
-                searchResults.textContent = '';
+                // Clear search if less than 2 characters
+                visualization.search('');
+                searchResults.textContent = searchTerm.length > 0 ? 'Enter at least 2 characters to search' : '';
+                nextMatchBtn.disabled = true;
             }
         }
     });
 
-    // Zoom controls
+    // Next match button
+    nextMatchBtn.addEventListener('click', () => {
+        if (visualization) {
+            const success = visualization.jumpToNextMatch();
+            if (success) {
+                const currentIndex = visualization.getCurrentMatchIndex();
+                const totalCount = visualization.getSearchResultCount();
+                searchResults.textContent = `Match ${currentIndex + 1} of ${totalCount}`;
+            }
+        }
+    });
+
+    // Zoom controls - use mouse position if available, otherwise center
     zoomInBtn.addEventListener('click', () => {
         zoomLevel = Math.min(zoomLevel * 1.5, 10);
         if (visualization) {
-            visualization.setZoom(zoomLevel);
+            // Use last known mouse position if available, otherwise zoom to center
+            visualization.setZoom(zoomLevel, mouseX || null, mouseY || null);
             zoomLevelDisplay.textContent = `${Math.round(zoomLevel * 100)}%`;
         }
     });
@@ -79,7 +176,8 @@ function setupControls() {
     zoomOutBtn.addEventListener('click', () => {
         zoomLevel = Math.max(zoomLevel / 1.5, 0.01);
         if (visualization) {
-            visualization.setZoom(zoomLevel);
+            // Use last known mouse position if available, otherwise zoom to center
+            visualization.setZoom(zoomLevel, mouseX || null, mouseY || null);
             zoomLevelDisplay.textContent = `${Math.round(zoomLevel * 100)}%`;
         }
     });
@@ -94,13 +192,31 @@ function setupControls() {
         }
     });
 
-    // Mouse wheel zoom
-    app.canvas.addEventListener('wheel', (e) => {
+    // Mouse wheel zoom - zoom towards mouse position
+    const canvas = app.canvas || app.view;
+    let mouseX = 0;
+    let mouseY = 0;
+    
+    // Track mouse position
+    canvas.addEventListener('mousemove', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        mouseX = e.clientX - rect.left;
+        mouseY = e.clientY - rect.top;
+    });
+    
+    canvas.addEventListener('wheel', (e) => {
         e.preventDefault();
+        
+        // Get mouse position relative to canvas
+        const rect = canvas.getBoundingClientRect();
+        const pointerX = e.clientX - rect.left;
+        const pointerY = e.clientY - rect.top;
+        
         const delta = e.deltaY > 0 ? 0.9 : 1.1;
         zoomLevel = Math.max(0.01, Math.min(10, zoomLevel * delta));
         if (visualization) {
-            visualization.setZoom(zoomLevel);
+            // Zoom towards the mouse pointer position
+            visualization.setZoom(zoomLevel, pointerX, pointerY);
             zoomLevelDisplay.textContent = `${Math.round(zoomLevel * 100)}%`;
         }
     });
@@ -110,13 +226,18 @@ function setupControls() {
     let lastMouseX = 0;
     let lastMouseY = 0;
 
-    app.canvas.addEventListener('mousedown', (e) => {
+    canvas.addEventListener('mousedown', (e) => {
         isDragging = true;
         lastMouseX = e.clientX;
         lastMouseY = e.clientY;
+        
+        // Update tracked mouse position
+        const rect = canvas.getBoundingClientRect();
+        mouseX = e.clientX - rect.left;
+        mouseY = e.clientY - rect.top;
     });
 
-    app.canvas.addEventListener('mousemove', (e) => {
+    canvas.addEventListener('mousemove', (e) => {
         if (isDragging && visualization) {
             const dx = e.clientX - lastMouseX;
             const dy = e.clientY - lastMouseY;
@@ -126,11 +247,11 @@ function setupControls() {
         }
     });
 
-    app.canvas.addEventListener('mouseup', () => {
+    canvas.addEventListener('mouseup', () => {
         isDragging = false;
     });
 
-    app.canvas.addEventListener('mouseleave', () => {
+    canvas.addEventListener('mouseleave', () => {
         isDragging = false;
     });
 }
