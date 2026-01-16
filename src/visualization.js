@@ -5,17 +5,20 @@ export async function createVisualization(text, app, progressCallback = null, bo
     const container = new Container();
     app.stage.addChild(container);
 
-    // Configuration
+    // Detect if viewing a single book (individual book filter)
+    const isSingleBookView = bookMarkers.length === 1;
+
+    // Configuration - adjust for single book view
     const config = {
         fontSize: 9, // Slightly larger for better clarity
         lineHeight: 11, // Adjusted for new font size
         charWidth: 5.4, // Adjusted for new font size
         padding: 20,
-        columnGap: 40, // Space between columns
+        columnGap: isSingleBookView ? 20 : 40, // Smaller gap for narrower columns
         highlightColor: 0xffff00,
         textColor: 0xffffff,
         backgroundColor: 0x1a1a1a,
-        lineWidth: 180, // Characters per line - wider columns
+        lineWidth: isSingleBookView ? 90 : 180, // Half width for single book view
     };
 
     let zoom = 1;
@@ -96,8 +99,8 @@ export async function createVisualization(text, app, progressCallback = null, bo
 
     // Calculate columns dynamically based on content
     // Set a minimum column height so small books don't spread too thin
-    const MIN_LINES_PER_COLUMN = 300; // Minimum lines before flowing to next column
-    const MAX_COLUMNS = 8;
+    const MIN_LINES_PER_COLUMN = isSingleBookView ? 225 : 300; // Fewer lines per column for single book
+    const MAX_COLUMNS = isSingleBookView ? 16 : 8; // Double columns for single book view
     
     // Calculate how many columns we actually need
     const neededColumns = Math.ceil(lines.length / MIN_LINES_PER_COLUMN);
