@@ -1,5 +1,6 @@
 import { Application } from 'pixi.js';
-import { loadBookOfMormon, BOOK_DEFINITIONS } from './loadText.js';
+import { loadBookOfMormon } from './loadText.js';
+import { BOOK_DEFINITIONS } from './bookDefinitions.js';
 import { createVisualization } from './visualization.js';
 import { SearchControls } from './controls/searchControls.js';
 import { ZoomControls } from './controls/zoomControls.js';
@@ -38,7 +39,7 @@ async function loadAndCreateVisualization(filterBookIndex = -1) {
         : 'Loading text file...');
     
     const loadStart = performance.now();
-    const { text, bookMarkers } = await loadBookOfMormon(filterBookIndex);
+    const { text, bookMarkers, verses, verseMeta } = await loadBookOfMormon(filterBookIndex);
     const loadTime = performance.now() - loadStart;
     console.log(`Text loaded in ${loadTime.toFixed(2)}ms, length:`, text.length);
     console.log(`Found ${bookMarkers.length} book markers`);
@@ -54,7 +55,7 @@ async function loadAndCreateVisualization(filterBookIndex = -1) {
 
     // Create visualization
     const processStart = performance.now();
-    visualization = await createVisualization(text, app, updateLoadingText, bookMarkers);
+    visualization = await createVisualization(text, app, updateLoadingText, bookMarkers, verses, verseMeta);
     const processTime = performance.now() - processStart;
     console.log(`Visualization created in ${processTime.toFixed(2)}ms`);
 

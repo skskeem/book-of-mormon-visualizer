@@ -46,6 +46,22 @@ The built files will be in the `dist/` directory.
 - **Pan**: Click and drag to move around the canvas
 - **Reset**: Click the "Reset" button to return to the default view
 
+### Semantic Search (Vector Embeddings)
+
+This project supports semantic search using a local embedding model. To enable it:
+
+1. Generate embeddings (one-time):
+```bash
+npm run generate-embeddings
+```
+This writes `public/embeddings.json`.
+
+2. Start the app and toggle **Semantic search** in the UI.
+
+Notes:
+- Semantic search is only available in the **All Books** view.
+- The first semantic query loads the model and may take a moment.
+
 ## Technology Stack
 
 - **PixiJS**: WebGL rendering engine

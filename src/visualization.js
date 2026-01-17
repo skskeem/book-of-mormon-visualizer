@@ -1,12 +1,12 @@
 import { Container, TextStyle } from 'pixi.js';
-import { BOOK_DEFINITIONS } from './loadText.js';
+import { SemanticSearchIndex } from './utils/semanticSearch.js';
 import { VISUALIZATION_CONFIG, ZOOM_CONFIG } from './config.js';
 import { wrapVerses, calculateColumnLayout, mapLinesToBooks, calculateBookRegions } from './utils/textProcessing.js';
 import { ViewportManager } from './utils/viewport.js';
 import { SearchManager } from './utils/search.js';
 import { TextRenderer, BookBackgroundRenderer, HighlightRenderer } from './utils/rendering.js';
 
-export async function createVisualization(text, app, progressCallback = null, bookMarkers = []) {
+export async function createVisualization(text, app, progressCallback = null, bookMarkers = [], verses = null, verseMeta = null) {
     const container = new Container();
     app.stage.addChild(container);
 
@@ -40,12 +40,13 @@ export async function createVisualization(text, app, progressCallback = null, bo
 
     // Process verses and wrap them
     if (progressCallback) progressCallback('Processing verses...');
-    const verses = text.split('\n');
-    const { lines, verseStartLines } = await wrapVerses(verses, config.lineWidth, progressCallback);
+    const verseList = verses ?? text.split('\n');
+    const verseMetaList = verseMeta ?? verseList.map((entry) => ({ kind: entry.length === 0 ? 'blank' : 'verse' }));
+    const { lines, verseStartLines } = await wrapVerses(verseList, config.lineWidth, progressCallback);
 
     if (progressCallback) progressCallback('Finalizing...');
 
-    console.log('Created', lines.length, 'wrapped lines from', verses.length, 'verses');
+    console.log('Created', lines.length, 'wrapped lines from', verseList.length, 'verses');
 
     // Calculate column layout
     const { numColumns, linesPerColumn, columnLines } = calculateColumnLayout(lines, isSingleBookView);
@@ -69,6 +70,16 @@ export async function createVisualization(text, app, progressCallback = null, bo
     // Initialize managers and renderers
     const viewportManager = new ViewportManager(config, app, maxColumnLength);
     const searchManager = new SearchManager();
+    const semanticState = {
+        status: 'idle',
+        message: ''
+    };
+    const semanticSupported = !isSingleBookView;
+    let semanticIndex = null;
+    let semanticMatchOrder = [];
+    let semanticMatchCursor = -1;
+    let semanticResultCount = 0;
+    let semanticScores = new Map(); // Map verseIndex -> score
 
     // Create text style
     const textStyle = new TextStyle({
@@ -153,6 +164,97 @@ export async function createVisualization(text, app, progressCallback = null, bo
     textRenderer.renderVisibleText(columnLines, cachedColumnXPositions, linesPerColumn, initialVisibleRange, currentTextResolution);
     console.log('Text rendering optimized with viewport culling');
     app.renderer.render(app.stage);
+
+    async function prepareSemanticSearch() {
+        if (!semanticSupported) {
+            semanticState.status = 'unsupported';
+            semanticState.message = 'Semantic search is only available in All Books view.';
+            return semanticState;
+        }
+
+        if (semanticState.status === 'ready') {
+            return semanticState;
+        }
+
+        semanticState.status = 'loading';
+        semanticState.message = 'Loading semantic index...';
+
+        try {
+            semanticIndex = new SemanticSearchIndex();
+            await semanticIndex.init();
+            semanticState.status = 'ready';
+            semanticState.message = 'Semantic index ready.';
+        } catch (error) {
+            if (error?.code === 'missing') {
+                semanticState.status = 'missing';
+                semanticState.message = 'Semantic index missing. Run the embeddings script.';
+            } else {
+                semanticState.status = 'error';
+                semanticState.message = 'Failed to load semantic index.';
+            }
+            console.error('Semantic search init error:', error);
+        }
+
+        return semanticState;
+    }
+
+    function clearSearchState() {
+        searchManager.clear();
+        semanticMatchOrder = [];
+        semanticMatchCursor = -1;
+        semanticResultCount = 0;
+        semanticScores.clear();
+        updateTransform();
+    }
+
+    function buildSemanticMatches(results) {
+        const matches = [];
+        semanticMatchOrder = [];
+        semanticMatchCursor = -1;
+        semanticResultCount = 0;
+        semanticScores.clear();
+
+        for (const result of results) {
+            const verseIndex = result.verseIndex;
+            const score = result.score;
+            const meta = verseMetaList[verseIndex];
+            if (!meta || meta.kind !== 'verse') {
+                continue;
+            }
+
+            const startLine = verseStartLines[verseIndex];
+            const endLine = verseIndex + 1 < verseStartLines.length
+                ? verseStartLines[verseIndex + 1] - 1
+                : lines.length - 1;
+
+            if (startLine === undefined || endLine < startLine) {
+                continue;
+            }
+
+            const firstMatchIndex = matches.length;
+            for (let lineIndex = startLine; lineIndex <= endLine; lineIndex++) {
+                const lineText = lines[lineIndex];
+                if (!lineText) continue;
+                matches.push({
+                    lineIndex,
+                    startChar: 0,
+                    endChar: lineText.length,
+                    lineText,
+                    verseIndex, // Store verse index for score lookup
+                    score // Store score on each match
+                });
+            }
+
+            if (matches.length > firstMatchIndex) {
+                semanticMatchOrder.push(firstMatchIndex);
+                semanticScores.set(verseIndex, score);
+                semanticResultCount++;
+            }
+        }
+
+        searchManager.setMatches(matches);
+        updateTransform();
+    }
 
     // Match navigation functions
     function calculateMatchPosition(matchIndex) {
@@ -246,6 +348,15 @@ export async function createVisualization(text, app, progressCallback = null, bo
         return jumpToMatchAndZoom(nextIndex);
     }
 
+    function jumpToNextSemanticMatchInternal() {
+        if (semanticMatchOrder.length === 0) {
+            return false;
+        }
+        semanticMatchCursor = (semanticMatchCursor + 1) % semanticMatchOrder.length;
+        const matchIndex = semanticMatchOrder[semanticMatchCursor];
+        return jumpToMatchAndZoom(matchIndex);
+    }
+
     // Public API
     return {
         setZoom(newZoom, focalPointX = null, focalPointY = null) {
@@ -285,20 +396,96 @@ export async function createVisualization(text, app, progressCallback = null, bo
         },
 
         search(term) {
+            semanticMatchOrder = [];
+            semanticMatchCursor = -1;
+            semanticResultCount = 0;
+            semanticScores.clear();
             searchManager.performSearch(lines, term);
             updateTransform();
+        },
+
+        async searchSemantic(term, topK = 50, minScore = null) {
+            if (!term || term.length < 2) {
+                clearSearchState();
+                return { status: 'cleared', count: 0 };
+            }
+
+            await prepareSemanticSearch();
+            if (semanticState.status !== 'ready') {
+                clearSearchState();
+                return { status: semanticState.status, message: semanticState.message, count: 0 };
+            }
+
+            // Get more results than requested, then filter by threshold if provided
+            const fetchCount = minScore !== null ? Math.max(topK, 100) : topK;
+            let results = await semanticIndex.searchText(term, fetchCount);
+            
+            // Filter by minimum score threshold if provided
+            if (minScore !== null && minScore > 0) {
+                results = results.filter(r => r.score >= minScore);
+                // Limit to topK after filtering
+                if (results.length > topK) {
+                    results = results.slice(0, topK);
+                }
+            }
+            
+            buildSemanticMatches(results);
+            return { 
+                status: semanticState.status, 
+                count: semanticResultCount,
+                scores: Array.from(semanticScores.entries()).map(([idx, score]) => ({ verseIndex: idx, score }))
+            };
         },
 
         getSearchResultCount() {
             return searchManager.getResultCount();
         },
 
+        getSemanticResultCount() {
+            return semanticResultCount;
+        },
+
         getCurrentMatchIndex() {
             return searchManager.getCurrentMatchIndex();
         },
 
+        getCurrentSemanticMatchIndex() {
+            return semanticMatchCursor;
+        },
+
         jumpToNextMatch() {
             return jumpToNextMatchInternal();
+        },
+
+        jumpToNextSemanticMatch() {
+            return jumpToNextSemanticMatchInternal();
+        },
+
+        clearSearch() {
+            clearSearchState();
+        },
+
+        isSemanticSearchSupported() {
+            return semanticSupported;
+        },
+
+        getSemanticStatus() {
+            return { ...semanticState };
+        },
+
+        getSemanticScores() {
+            return Array.from(semanticScores.entries()).map(([verseIndex, score]) => ({
+                verseIndex,
+                score
+            }));
+        },
+
+        getSemanticScoreForVerse(verseIndex) {
+            return semanticScores.get(verseIndex) ?? null;
+        },
+
+        getSearchManager() {
+            return searchManager;
         },
 
         handleResize() {

@@ -53,6 +53,26 @@ export class SearchManager {
     }
 
     /**
+     * Sets matches directly (used for semantic search results)
+     * @param {Array} matches - Array of match objects
+     */
+    setMatches(matches) {
+        this.searchMatches = matches;
+        this.matchesByLine.clear();
+        this.searchResultCount = matches.length;
+        this.currentMatchIndex = -1;
+
+        matches.forEach((match, matchIndex) => {
+            let lineMatches = this.matchesByLine.get(match.lineIndex);
+            if (!lineMatches) {
+                lineMatches = [];
+                this.matchesByLine.set(match.lineIndex, lineMatches);
+            }
+            lineMatches.push(matchIndex);
+        });
+    }
+
+    /**
      * Gets matches for a specific line
      * @param {number} lineIndex - Line index
      * @returns {number[]} - Array of match indices

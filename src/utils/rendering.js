@@ -1,5 +1,5 @@
 import { Text, Graphics, TextStyle } from 'pixi.js';
-import { BOOK_DEFINITIONS } from '../loadText.js';
+import { BOOK_DEFINITIONS } from '../bookDefinitions.js';
 import { VISUALIZATION_CONFIG, HIGHLIGHT_CONFIG, BOOK_BACKGROUND_OPACITY } from '../config.js';
 
 /**

@@ -1,4 +1,4 @@
-import { BOOK_DEFINITIONS } from '../loadText.js';
+import { BOOK_DEFINITIONS } from '../bookDefinitions.js';
 
 /**
  * Generates and manages the book legend
