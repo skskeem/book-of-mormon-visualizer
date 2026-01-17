@@ -22,7 +22,9 @@ export class TextRenderer {
         if (this.spritePool.length > 0) {
             return this.spritePool.pop();
         }
-        return new Text('', this.textStyle);
+        const sprite = new Text('', this.textStyle);
+        sprite.zIndex = 2;
+        return sprite;
     }
 
     /**
@@ -85,6 +87,7 @@ export class TextRenderer {
                 sprite.x = colX;
                 sprite.y = this.config.padding + lineIndex * this.config.lineHeight;
                 sprite.visible = true;
+                sprite.zIndex = 2;
 
                 if (!sprite.parent) {
                     this.container.addChild(sprite);
@@ -129,6 +132,7 @@ export class BookBackgroundRenderer {
         this.container = container;
         this.config = config;
         this.graphics = new Graphics();
+        this.graphics.zIndex = 0;
         container.addChild(this.graphics);
     }
 
@@ -195,6 +199,7 @@ export class HighlightRenderer {
         this.highlightGraphics = new Graphics();
         this.highlightSprites = new Map();
         this.visibleMatchIndices = new Set();
+        this.highlightGraphics.zIndex = 1;
         container.addChild(this.highlightGraphics);
     }
 
@@ -251,6 +256,7 @@ export class HighlightRenderer {
                     highlightGraphic.eventMode = 'static';
                     highlightGraphic.cursor = 'pointer';
                     highlightGraphic.matchIndex = matchIndex;
+                    highlightGraphic.zIndex = 1;
 
                     highlightGraphic.on('pointerdown', () => {
                         if (jumpToMatchCallback) {

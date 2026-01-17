@@ -8,6 +8,7 @@ import { TextRenderer, BookBackgroundRenderer, HighlightRenderer } from './utils
 
 export async function createVisualization(text, app, progressCallback = null, bookMarkers = [], verses = null, verseMeta = null) {
     const container = new Container();
+    container.sortableChildren = true;
     app.stage.addChild(container);
 
     // Detect if viewing a single book
@@ -204,6 +205,7 @@ export async function createVisualization(text, app, progressCallback = null, bo
         semanticMatchCursor = -1;
         semanticResultCount = 0;
         semanticScores.clear();
+        needsRender = true;
         updateTransform();
     }
 
@@ -253,6 +255,7 @@ export async function createVisualization(text, app, progressCallback = null, bo
         }
 
         searchManager.setMatches(matches);
+        needsRender = true;
         updateTransform();
     }
 
@@ -401,10 +404,11 @@ export async function createVisualization(text, app, progressCallback = null, bo
             semanticResultCount = 0;
             semanticScores.clear();
             searchManager.performSearch(lines, term);
+            needsRender = true;
             updateTransform();
         },
 
-        async searchSemantic(term, topK = 50, minScore = null) {
+        async searchSemantic(term, topK = null, minScore = null) {
             if (!term || term.length < 2) {
                 clearSearchState();
                 return { status: 'cleared', count: 0 };
@@ -417,14 +421,14 @@ export async function createVisualization(text, app, progressCallback = null, bo
             }
 
             // Get more results than requested, then filter by threshold if provided
-            const fetchCount = minScore !== null ? Math.max(topK, 100) : topK;
+            const fetchCount = topK === null ? null : (minScore !== null ? Math.max(topK, 100) : topK);
             let results = await semanticIndex.searchText(term, fetchCount);
             
             // Filter by minimum score threshold if provided
             if (minScore !== null && minScore > 0) {
                 results = results.filter(r => r.score >= minScore);
-                // Limit to topK after filtering
-                if (results.length > topK) {
+                // Limit to topK after filtering (if a cap is provided)
+                if (topK !== null && results.length > topK) {
                     results = results.slice(0, topK);
                 }
             }

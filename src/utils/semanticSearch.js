@@ -3,6 +3,13 @@ let pipeline, env;
 
 async function loadTransformers() {
     if (!pipeline || !env) {
+        const ortCommon = await import('onnxruntime-common');
+        if (typeof globalThis !== 'undefined' && !globalThis.ort) {
+            globalThis.ort = ortCommon;
+        }
+
+        await import('onnxruntime-web');
+
         const transformers = await import('@xenova/transformers');
         pipeline = transformers.pipeline;
         env = transformers.env;
@@ -73,6 +80,12 @@ export class SemanticSearchIndex {
                 envObj.remoteHost = 'https://huggingface.co/';
                 envObj.remotePathTemplate = '{model}/resolve/{revision}/';
                 envObj.useBrowserCache = true;
+
+                // Configure ONNX backend for stability
+                if (envObj.backends?.onnx?.wasm) {
+                    envObj.backends.onnx.wasm.numThreads = 1;
+                    envObj.backends.onnx.wasm.proxy = false;
+                }
                 
                 // Add fetch interceptor to debug failing requests
                 if (typeof window !== 'undefined') {
@@ -152,13 +165,22 @@ export class SemanticSearchIndex {
     }
 
     search(queryEmbedding, topK = 25) {
+        const limit = topK === null || topK <= 0 ? null : topK;
         const results = [];
+
+        if (limit === null) {
+            for (const item of this.items) {
+                const score = dotProduct(queryEmbedding, item.embedding);
+                results.push({ verseIndex: item.verseIndex, score });
+            }
+            return results.sort((a, b) => b.score - a.score);
+        }
 
         for (const item of this.items) {
             const score = dotProduct(queryEmbedding, item.embedding);
-            if (results.length < topK) {
+            if (results.length < limit) {
                 results.push({ verseIndex: item.verseIndex, score });
-                if (results.length === topK) {
+                if (results.length === limit) {
                     results.sort((a, b) => a.score - b.score);
                 }
             } else if (score > results[0].score) {

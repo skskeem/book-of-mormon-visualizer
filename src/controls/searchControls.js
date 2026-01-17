@@ -101,14 +101,14 @@ export class SearchControls {
                     }
                     
                     this.searchResults.innerHTML = `
-                        <div>Top ${count} semantic match${count !== 1 ? 'es' : ''}</div>
+                        <div>Showing ${count} semantic match${count !== 1 ? 'es' : ''}</div>
                         <div style="font-size: 11px; color: #888; margin-top: 4px;">
                             Scores: ${maxScore.toFixed(3)} (max) / ${avgScore.toFixed(3)} (avg) / ${minScore.toFixed(3)} (min)
                         </div>
                         ${currentScoreText}
                     `;
                 } else {
-                    this.searchResults.textContent = `Top ${count} semantic match${count !== 1 ? 'es' : ''}`;
+                    this.searchResults.textContent = `Showing ${count} semantic match${count !== 1 ? 'es' : ''}`;
                 }
             } else {
                 this.searchResults.textContent = 'No semantic matches found';
@@ -181,7 +181,7 @@ export class SearchControls {
         this.semanticSearchTimer = setTimeout(async () => {
             const thresholdValue = this.semanticThreshold?.value;
             const minScore = thresholdValue && thresholdValue !== '' ? parseFloat(thresholdValue) : null;
-            const result = await this.visualization.searchSemantic(this.searchTerm, 50, minScore);
+            const result = await this.visualization.searchSemantic(this.searchTerm, null, minScore);
             if (result?.status && result.status !== 'ready') {
                 this.searchResults.textContent = result.message || 'Semantic search unavailable';
                 this.nextMatchBtn.disabled = true;

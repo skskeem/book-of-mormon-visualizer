@@ -17,10 +17,7 @@ export default defineConfig({
       transformMixedEsModules: true,
     },
     rollupOptions: {
-      external: (id) => {
-        // Don't bundle transformers - let it load dynamically
-        return id.includes('@xenova/transformers');
-      },
+      // transformers.js handled by optimizeDeps.exclude
     },
   },
 });
