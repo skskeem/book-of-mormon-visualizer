@@ -4,172 +4,20 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Book of Mormon Visualizer</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            overflow: hidden;
-            background: #1a1a1a;
-        }
-
-        #app {
-            width: 100vw;
-            height: 100vh;
-            position: relative;
-        }
-
-        #controls {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            z-index: 1000;
-            background: rgba(0, 0, 0, 0.8);
-            padding: 20px;
-            border-radius: 8px;
-            backdrop-filter: blur(10px);
-            min-width: 300px;
-        }
-
-        #search-container {
-            margin-bottom: 15px;
-        }
-
-        #search-input {
-            width: 100%;
-            padding: 10px;
-            font-size: 16px;
-            border: 2px solid #444;
-            border-radius: 4px;
-            background: #2a2a2a;
-            color: #fff;
-            outline: none;
-        }
-
-        #search-input:focus {
-            border-color: #4a9eff;
-        }
-
-        #search-results {
-            margin-top: 10px;
-            color: #aaa;
-            font-size: 14px;
-        }
-
-        #zoom-controls {
-            display: flex;
-            gap: 10px;
-            align-items: center;
-        }
-
-        button {
-            padding: 8px 16px;
-            background: #4a9eff;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: background 0.2s;
-        }
-
-        button:hover {
-            background: #3a8eef;
-        }
-
-        button:active {
-            background: #2a7edf;
-        }
-
-        #zoom-level {
-            color: #fff;
-            font-size: 14px;
-            min-width: 80px;
-        }
-
-        #canvas-container {
-            width: 100%;
-            height: 100%;
-        }
-
-        #book-legend {
-            position: absolute;
-            bottom: 20px;
-            right: 20px;
-            z-index: 1000;
-            background: rgba(0, 0, 0, 0.85);
-            padding: 15px;
-            border-radius: 8px;
-            backdrop-filter: blur(10px);
-            max-height: 60vh;
-            overflow-y: auto;
-            font-size: 12px;
-        }
-
-        #book-legend h3 {
-            color: #fff;
-            margin: 0 0 10px 0;
-            font-size: 14px;
-            border-bottom: 1px solid #444;
-            padding-bottom: 8px;
-        }
-
-        .legend-item {
-            display: flex;
-            align-items: center;
-            margin: 5px 0;
-            color: #ddd;
-        }
-
-        .legend-color {
-            width: 16px;
-            height: 16px;
-            border-radius: 3px;
-            margin-right: 8px;
-            flex-shrink: 0;
-        }
-
-        #toggle-legend {
-            position: absolute;
-            bottom: 20px;
-            right: 20px;
-            z-index: 999;
-            padding: 8px 12px;
-            font-size: 12px;
-        }
-    </style>
+    <link rel="stylesheet" href="/src/styles.css">
 </head>
 <body>
     <div id="app">
         <div id="controls">
-            <div id="book-filter-container" style="margin-bottom: 15px;">
-                <select id="book-filter" style="width: 100%; padding: 10px; font-size: 14px; border: 2px solid #444; border-radius: 4px; background: #2a2a2a; color: #fff; cursor: pointer;">
-                    <option value="-1">All Books</option>
-                    <option value="0">1 Nephi</option>
-                    <option value="1">2 Nephi</option>
-                    <option value="2">Jacob</option>
-                    <option value="3">Enos</option>
-                    <option value="4">Jarom</option>
-                    <option value="5">Omni</option>
-                    <option value="6">Words of Mormon</option>
-                    <option value="7">Mosiah</option>
-                    <option value="8">Alma</option>
-                    <option value="9">Helaman</option>
-                    <option value="10">3 Nephi</option>
-                    <option value="11">4 Nephi</option>
-                    <option value="12">Mormon</option>
-                    <option value="13">Ether</option>
-                    <option value="14">Moroni</option>
+            <div id="book-filter-container">
+                <select id="book-filter">
+                    <!-- Options will be generated dynamically -->
                 </select>
             </div>
             <div id="search-container">
                 <input type="text" id="search-input" placeholder="Search text...">
                 <div id="search-results"></div>
-                <button id="next-match" style="margin-top: 10px; width: 100%;">Next Match</button>
+                <button id="next-match">Next Match</button>
             </div>
             <div id="zoom-controls">
                 <button id="zoom-out">Zoom Out</button>
@@ -180,25 +28,10 @@
         </div>
         <div id="book-legend">
             <h3>📖 Books</h3>
-            <div class="legend-item"><div class="legend-color" style="background: #3B82F6;"></div>1 Nephi</div>
-            <div class="legend-item"><div class="legend-color" style="background: #8B5CF6;"></div>2 Nephi</div>
-            <div class="legend-item"><div class="legend-color" style="background: #EC4899;"></div>Jacob</div>
-            <div class="legend-item"><div class="legend-color" style="background: #F97316;"></div>Enos</div>
-            <div class="legend-item"><div class="legend-color" style="background: #FB923C;"></div>Jarom</div>
-            <div class="legend-item"><div class="legend-color" style="background: #FBBF24;"></div>Omni</div>
-            <div class="legend-item"><div class="legend-color" style="background: #A3E635;"></div>Words of Mormon</div>
-            <div class="legend-item"><div class="legend-color" style="background: #10B981;"></div>Mosiah</div>
-            <div class="legend-item"><div class="legend-color" style="background: #EF4444;"></div>Alma</div>
-            <div class="legend-item"><div class="legend-color" style="background: #F59E0B;"></div>Helaman</div>
-            <div class="legend-item"><div class="legend-color" style="background: #06B6D4;"></div>3 Nephi</div>
-            <div class="legend-item"><div class="legend-color" style="background: #84CC16;"></div>4 Nephi</div>
-            <div class="legend-item"><div class="legend-color" style="background: #6366F1;"></div>Mormon</div>
-            <div class="legend-item"><div class="legend-color" style="background: #14B8A6;"></div>Ether</div>
-            <div class="legend-item"><div class="legend-color" style="background: #A855F7;"></div>Moroni</div>
+            <!-- Legend items will be generated dynamically -->
         </div>
         <div id="canvas-container"></div>
     </div>
     <script type="module" src="/src/main.js"></script>
 </body>
 </html>
-
