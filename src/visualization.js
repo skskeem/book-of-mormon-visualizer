@@ -87,7 +87,7 @@ export async function createVisualization(text, app, progressCallback = null, bo
         status: 'idle',
         message: ''
     };
-    const semanticSupported = !isSingleBookView;
+    const semanticSupported = true;
     let semanticIndex = null;
     let semanticMatchOrder = [];
     let semanticMatchCursor = -1;
@@ -179,12 +179,6 @@ export async function createVisualization(text, app, progressCallback = null, bo
     app.renderer.render(app.stage);
 
     async function prepareSemanticSearch() {
-        if (!semanticSupported) {
-            semanticState.status = 'unsupported';
-            semanticState.message = 'Semantic search is only available in All Books view.';
-            return semanticState;
-        }
-
         if (semanticState.status === 'ready') {
             return semanticState;
         }
