@@ -26,6 +26,8 @@ body {
     border-radius: 8px;
     backdrop-filter: blur(10px);
     min-width: 300px;
+    width: 320px;
+    max-width: 320px;
 }
 
 #book-filter-container {
@@ -117,6 +119,138 @@ body {
     margin-top: 10px;
     color: #aaa;
     font-size: 14px;
+}
+
+#semantic-results-container {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid #333;
+}
+
+#semantic-results-header {
+    color: #ddd;
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 6px;
+}
+
+#semantic-results-status {
+    color: #888;
+    font-size: 11px;
+    margin-bottom: 6px;
+}
+
+#semantic-results-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 220px;
+    overflow-y: auto;
+    max-width: 100%;
+}
+
+.semantic-result-item {
+    text-align: left;
+    padding: 6px 8px;
+    background: #222;
+    border: 1px solid #333;
+    border-radius: 4px;
+    color: #ddd;
+    font-size: 12px;
+    cursor: pointer;
+    max-width: 100%;
+}
+
+.semantic-result-item:hover {
+    border-color: #4a9eff;
+    background: #262b33;
+}
+
+.semantic-result-ref {
+    color: #8ec7ff;
+    font-weight: 600;
+    font-size: 11px;
+}
+
+.semantic-result-score {
+    color: #7aa86a;
+    font-size: 11px;
+    margin-left: 6px;
+}
+
+.semantic-result-text {
+    color: #bbb;
+    font-size: 11px;
+    margin-top: 4px;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+#crossref-container {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid #333;
+}
+
+#crossref-header {
+    color: #ddd;
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 6px;
+}
+
+#crossref-status {
+    color: #888;
+    font-size: 11px;
+    margin-bottom: 6px;
+}
+
+#crossref-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 200px;
+    overflow-y: auto;
+    max-width: 100%;
+}
+
+.crossref-item {
+    text-align: left;
+    padding: 6px 8px;
+    background: #222;
+    border: 1px solid #333;
+    border-radius: 4px;
+    color: #ddd;
+    font-size: 12px;
+    cursor: pointer;
+    max-width: 100%;
+}
+
+.crossref-item:hover {
+    border-color: #4a9eff;
+    background: #262b33;
+}
+
+.crossref-ref {
+    color: #8ec7ff;
+    font-weight: 600;
+    font-size: 11px;
+}
+
+.crossref-score {
+    color: #7aa86a;
+    font-size: 11px;
+    margin-left: 6px;
+}
+
+.crossref-text {
+    color: #bbb;
+    font-size: 11px;
+    margin-top: 4px;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 #next-match {

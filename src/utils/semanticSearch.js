@@ -28,13 +28,24 @@ export class SemanticSearchIndex {
     constructor({ embeddingsUrl = '/embeddings.json', modelId = 'Xenova/all-MiniLM-L6-v2' } = {}) {
         this.embeddingsUrl = embeddingsUrl;
         this.modelId = modelId;
-        this.items = [];
         this.embeddingSize = 0;
         this.extractor = null;
+        this.embeddingsPacked = null;
+        this.verseIndices = null;
+        this.verseIndexToRow = new Map();
+        this.worker = null;
+        this.workerReady = false;
+        this.workerReadyPromise = null;
+        this.pendingRequests = new Map();
+        this.nextRequestId = 1;
+        this.workerSupported = typeof Worker !== 'undefined';
     }
 
     async init() {
         await this._loadEmbeddings();
+        if (this.workerSupported) {
+            await this._loadWorker();
+        }
         await this._loadModel();
     }
 
@@ -57,13 +68,85 @@ export class SemanticSearchIndex {
             error.code = 'invalid_format';
             throw error;
         }
-        this.embeddingSize = data.embeddingSize || 0;
-        this.items = data.items
-            .filter((item) => Array.isArray(item.embedding) && typeof item.verseIndex === 'number')
-            .map((item) => ({
-                verseIndex: item.verseIndex,
-                embedding: Float32Array.from(item.embedding)
-            }));
+        const rawItems = data.items
+            .filter((item) => Array.isArray(item.embedding) && typeof item.verseIndex === 'number');
+        const inferredSize = rawItems.length > 0 ? rawItems[0].embedding.length : 0;
+        this.embeddingSize = data.embeddingSize || inferredSize;
+        if (!this.embeddingSize || this.embeddingSize <= 0) {
+            const error = new Error('Invalid embedding size in embeddings file.');
+            error.code = 'invalid_format';
+            throw error;
+        }
+
+        const validItems = rawItems.filter((item) => item.embedding.length === this.embeddingSize);
+        const itemCount = validItems.length;
+        this.embeddingsPacked = new Float32Array(itemCount * this.embeddingSize);
+        this.verseIndices = new Int32Array(itemCount);
+        this.verseIndexToRow.clear();
+
+        for (let i = 0; i < itemCount; i++) {
+            const item = validItems[i];
+            this.verseIndices[i] = item.verseIndex;
+            this.verseIndexToRow.set(item.verseIndex, i);
+            this.embeddingsPacked.set(item.embedding, i * this.embeddingSize);
+        }
+    }
+
+    async _loadWorker() {
+        if (this.worker) return;
+
+        this.worker = new Worker(new URL('../workers/semanticSearchWorker.js', import.meta.url), { type: 'module' });
+        this.workerReady = false;
+        let resolveReady = null;
+        this.workerReadyPromise = new Promise((resolve) => {
+            resolveReady = resolve;
+        });
+
+        this.worker.onmessage = (event) => {
+            const { type } = event.data || {};
+            if (type === 'ready') {
+                this.workerReady = true;
+                if (resolveReady) {
+                    resolveReady();
+                    resolveReady = null;
+                }
+                return;
+            }
+            if (type === 'result') {
+                const { requestId, results } = event.data;
+                const pending = this.pendingRequests.get(requestId);
+                if (pending) {
+                    this.pendingRequests.delete(requestId);
+                    pending.resolve(results);
+                }
+                return;
+            }
+            if (type === 'error') {
+                const error = new Error(event.data?.message || 'Semantic worker error');
+                const pending = this.pendingRequests.get(event.data?.requestId);
+                if (pending) {
+                    this.pendingRequests.delete(event.data.requestId);
+                    pending.reject(error);
+                } else {
+                    console.error('Semantic worker error:', error, event.data?.stack || '');
+                }
+            }
+        };
+
+        const embeddingsBuffer = this.embeddingsPacked.buffer;
+        const verseIndicesBuffer = this.verseIndices.buffer;
+        this.worker.postMessage({
+            type: 'init',
+            embeddingsBuffer,
+            verseIndicesBuffer,
+            size: this.embeddingSize
+        }, [embeddingsBuffer, verseIndicesBuffer]);
+
+        this.embeddingsPacked = null;
+        this.verseIndices = null;
+        this.verseIndexToRow.clear();
+
+        await this.workerReadyPromise;
     }
 
     async _loadModel() {
@@ -164,45 +247,164 @@ export class SemanticSearchIndex {
         return Float32Array.from(result.data);
     }
 
-    search(queryEmbedding, topK = 25) {
-        const limit = topK === null || topK <= 0 ? null : topK;
-        const results = [];
-
-        if (limit === null) {
-            for (const item of this.items) {
-                const score = dotProduct(queryEmbedding, item.embedding);
-                results.push({ verseIndex: item.verseIndex, score });
-            }
-            return results.sort((a, b) => b.score - a.score);
+    async search(queryEmbedding, topK = 25) {
+        if (this.worker && this.workerReady) {
+            return this._requestWorker('search', { queryEmbedding, topK });
         }
+        return this._searchPacked(queryEmbedding, topK);
+    }
 
-        for (const item of this.items) {
-            const score = dotProduct(queryEmbedding, item.embedding);
-            if (results.length < limit) {
-                results.push({ verseIndex: item.verseIndex, score });
-                if (results.length === limit) {
-                    results.sort((a, b) => a.score - b.score);
-                }
-            } else if (score > results[0].score) {
-                results[0] = { verseIndex: item.verseIndex, score };
-                results.sort((a, b) => a.score - b.score);
-            }
+    async searchByVerseIndex(verseIndex, topK = 10, minScore = null) {
+        if (this.worker && this.workerReady) {
+            return this._requestWorker('searchByVerseIndex', { verseIndex, topK, minScore });
         }
-
-        return results.sort((a, b) => b.score - a.score);
+        return this._searchByVerseIndexPacked(verseIndex, topK, minScore);
     }
 
     async searchText(text, topK = 25) {
         const embedding = await this.embedQuery(text);
         return this.search(embedding, topK);
     }
+
+    _requestWorker(type, payload) {
+        if (!this.worker) {
+            return Promise.reject(new Error('Semantic worker not available'));
+        }
+
+        if (!this.workerReady && this.workerReadyPromise) {
+            return this.workerReadyPromise.then(() => this._requestWorker(type, payload));
+        }
+
+        const requestId = this.nextRequestId++;
+        const message = { type, requestId, ...payload };
+        let transfer = [];
+
+        if (payload?.queryEmbedding) {
+            message.queryEmbeddingBuffer = payload.queryEmbedding.buffer;
+            delete message.queryEmbedding;
+            transfer = [message.queryEmbeddingBuffer];
+        }
+
+        return new Promise((resolve, reject) => {
+            this.pendingRequests.set(requestId, { resolve, reject });
+            this.worker.postMessage(message, transfer);
+        });
+    }
+
+    _searchPacked(queryEmbedding, topK = 25) {
+        if (!this.embeddingsPacked || !this.verseIndices) return [];
+        const limit = topK === null || topK <= 0 ? null : topK;
+        const results = [];
+
+        if (limit === null) {
+            for (let row = 0; row < this.verseIndices.length; row++) {
+                const score = dotProductQueryRow(queryEmbedding, this.embeddingsPacked, this.embeddingSize, row);
+                results.push({ verseIndex: this.verseIndices[row], score });
+            }
+            return results.sort((a, b) => b.score - a.score);
+        }
+
+        const heap = [];
+        for (let row = 0; row < this.verseIndices.length; row++) {
+            const score = dotProductQueryRow(queryEmbedding, this.embeddingsPacked, this.embeddingSize, row);
+            if (heap.length < limit) {
+                heapPush(heap, { verseIndex: this.verseIndices[row], score });
+            } else if (score > heap[0].score) {
+                heapReplaceRoot(heap, { verseIndex: this.verseIndices[row], score });
+            }
+        }
+
+        return heap.sort((a, b) => b.score - a.score);
+    }
+
+    _searchByVerseIndexPacked(verseIndex, topK = 10, minScore = null) {
+        if (!this.embeddingsPacked || !this.verseIndices) return [];
+        const rowIndex = this.verseIndexToRow.get(verseIndex);
+        if (rowIndex === undefined) return [];
+
+        const limit = topK === null || topK <= 0 ? null : topK;
+        const results = [];
+
+        if (limit === null) {
+            for (let row = 0; row < this.verseIndices.length; row++) {
+                if (this.verseIndices[row] === verseIndex) continue;
+                const score = dotProductRowRow(this.embeddingsPacked, this.embeddingSize, rowIndex, row);
+                if (minScore !== null && score < minScore) continue;
+                results.push({ verseIndex: this.verseIndices[row], score });
+            }
+            return results.sort((a, b) => b.score - a.score);
+        }
+
+        const heap = [];
+        for (let row = 0; row < this.verseIndices.length; row++) {
+            if (this.verseIndices[row] === verseIndex) continue;
+            const score = dotProductRowRow(this.embeddingsPacked, this.embeddingSize, rowIndex, row);
+            if (minScore !== null && score < minScore) continue;
+            if (heap.length < limit) {
+                heapPush(heap, { verseIndex: this.verseIndices[row], score });
+            } else if (score > heap[0].score) {
+                heapReplaceRoot(heap, { verseIndex: this.verseIndices[row], score });
+            }
+        }
+
+        return heap.sort((a, b) => b.score - a.score);
+    }
 }
 
-function dotProduct(a, b) {
-    const len = Math.min(a.length, b.length);
+function dotProductQueryRow(queryEmbedding, embeddingsPacked, embeddingSize, rowIndex) {
+    const offset = rowIndex * embeddingSize;
     let sum = 0;
-    for (let i = 0; i < len; i++) {
-        sum += a[i] * b[i];
+    for (let i = 0; i < embeddingSize; i++) {
+        sum += queryEmbedding[i] * embeddingsPacked[offset + i];
     }
     return sum;
+}
+
+function dotProductRowRow(embeddingsPacked, embeddingSize, rowA, rowB) {
+    const offsetA = rowA * embeddingSize;
+    const offsetB = rowB * embeddingSize;
+    let sum = 0;
+    for (let i = 0; i < embeddingSize; i++) {
+        sum += embeddingsPacked[offsetA + i] * embeddingsPacked[offsetB + i];
+    }
+    return sum;
+}
+
+function heapPush(heap, item) {
+    heap.push(item);
+    let index = heap.length - 1;
+    while (index > 0) {
+        const parent = Math.floor((index - 1) / 2);
+        if (heap[parent].score <= heap[index].score) break;
+        const temp = heap[parent];
+        heap[parent] = heap[index];
+        heap[index] = temp;
+        index = parent;
+    }
+}
+
+function heapReplaceRoot(heap, item) {
+    heap[0] = item;
+    heapify(heap, 0);
+}
+
+function heapify(heap, index) {
+    const length = heap.length;
+    while (true) {
+        const left = index * 2 + 1;
+        const right = index * 2 + 2;
+        let smallest = index;
+
+        if (left < length && heap[left].score < heap[smallest].score) {
+            smallest = left;
+        }
+        if (right < length && heap[right].score < heap[smallest].score) {
+            smallest = right;
+        }
+        if (smallest === index) break;
+        const temp = heap[index];
+        heap[index] = heap[smallest];
+        heap[smallest] = temp;
+        index = smallest;
+    }
 }

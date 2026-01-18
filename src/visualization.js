@@ -45,6 +45,18 @@ export async function createVisualization(text, app, progressCallback = null, bo
     const verseMetaList = verseMeta ?? verseList.map((entry) => ({ kind: entry.length === 0 ? 'blank' : 'verse' }));
     const { lines, verseStartLines } = await wrapVerses(verseList, config.lineWidth, progressCallback);
 
+    const lineToVerseIndex = new Array(lines.length).fill(-1);
+    for (let verseIndex = 0; verseIndex < verseStartLines.length; verseIndex++) {
+        const startLine = verseStartLines[verseIndex];
+        if (startLine === undefined) continue;
+        const endLine = verseIndex + 1 < verseStartLines.length
+            ? verseStartLines[verseIndex + 1] - 1
+            : lines.length - 1;
+        for (let lineIndex = startLine; lineIndex <= endLine; lineIndex++) {
+            lineToVerseIndex[lineIndex] = verseIndex;
+        }
+    }
+
     if (progressCallback) progressCallback('Finalizing...');
 
     console.log('Created', lines.length, 'wrapped lines from', verseList.length, 'verses');
@@ -281,6 +293,51 @@ export async function createVisualization(text, app, progressCallback = null, bo
         return { matchWorldX, matchWorldY };
     }
 
+    function calculateLinePosition(lineIndex, startChar = 0) {
+        if (lineIndex < 0 || lineIndex >= lines.length) return null;
+
+        const columnIndex = Math.min(Math.floor(lineIndex / linesPerColumn), numColumns - 1);
+        const columnLineIndex = lineIndex - (columnIndex * linesPerColumn);
+        const matchColumnX = config.padding + columnIndex * (columnWidth + config.columnGap);
+        const lineText = lines[lineIndex] || '';
+        const beforeMatch = lineText.substring(0, startChar);
+        const beforeWidth = beforeMatch.length * config.charWidth;
+        const matchWorldX = matchColumnX + beforeWidth;
+        const matchWorldY = config.padding + columnLineIndex * config.lineHeight;
+
+        return { matchWorldX, matchWorldY };
+    }
+
+    function jumpToLineAndZoom(lineIndex) {
+        const position = calculateLinePosition(lineIndex, 0);
+        if (!position) return false;
+
+        const { matchWorldX, matchWorldY } = position;
+        const centerScreenX = app.screen.width / 2;
+        const centerScreenY = app.screen.height / 2;
+
+        const targetZoom = Math.max(
+            ZOOM_CONFIG.clickZoomMin,
+            Math.min(ZOOM_CONFIG.clickZoomMax, zoom * ZOOM_CONFIG.clickZoomMultiplier)
+        );
+
+        zoom = targetZoom;
+        const matchScreenX = matchWorldX * zoom;
+        const matchScreenY = matchWorldY * zoom;
+        offsetX = centerScreenX - matchScreenX;
+        offsetY = centerScreenY - matchScreenY;
+
+        updateTransform();
+
+        if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('visualization-zoom-changed', {
+                detail: { zoom: targetZoom }
+            }));
+        }
+
+        return true;
+    }
+
     function jumpToMatchAndZoom(matchIndex) {
         if (searchManager.getResultCount() === 0 || matchIndex < 0 || matchIndex >= searchManager.getResultCount()) {
             return false;
@@ -358,6 +415,17 @@ export async function createVisualization(text, app, progressCallback = null, bo
         semanticMatchCursor = (semanticMatchCursor + 1) % semanticMatchOrder.length;
         const matchIndex = semanticMatchOrder[semanticMatchCursor];
         return jumpToMatchAndZoom(matchIndex);
+    }
+
+    function getVerseIndexForLine(lineIndex) {
+        if (lineIndex < 0 || lineIndex >= lineToVerseIndex.length) return -1;
+        return lineToVerseIndex[lineIndex] ?? -1;
+    }
+
+    function formatVerseReference(verseIndex) {
+        const meta = verseMetaList[verseIndex];
+        if (!meta || meta.kind !== 'verse') return null;
+        return `${meta.book} ${meta.chapter}:${meta.verse}`;
     }
 
     // Public API
@@ -488,8 +556,51 @@ export async function createVisualization(text, app, progressCallback = null, bo
             return semanticScores.get(verseIndex) ?? null;
         },
 
+        getVerseInfo(verseIndex) {
+            const reference = formatVerseReference(verseIndex) || 'Unknown';
+            const text = verseList[verseIndex] || '';
+            return { reference, text };
+        },
+
         getSearchManager() {
             return searchManager;
+        },
+
+        async getAutoCrossRefsForMatch(matchIndex, minScore = 0.25, limit = 10) {
+            const match = searchManager.getMatch(matchIndex);
+            if (!match) {
+                return { status: 'no-match', message: 'No match selected.', refs: [] };
+            }
+
+            let verseIndex = match.verseIndex;
+            if (verseIndex === undefined || verseIndex === null) {
+                verseIndex = getVerseIndexForLine(match.lineIndex);
+            }
+
+            if (verseIndex === undefined || verseIndex === null || verseIndex < 0) {
+                return { status: 'no-verse', message: 'No verse found for this match.', refs: [] };
+            }
+
+            await prepareSemanticSearch();
+            if (semanticState.status !== 'ready') {
+                return { status: semanticState.status, message: semanticState.message, refs: [] };
+            }
+
+            const results = await semanticIndex.searchByVerseIndex(verseIndex, limit, minScore);
+            const refs = results.map((result) => ({
+                verseIndex: result.verseIndex,
+                score: result.score,
+                reference: formatVerseReference(result.verseIndex) || 'Unknown',
+                text: verseList[result.verseIndex] || ''
+            }));
+
+            return { status: 'ready', verseIndex, refs };
+        },
+
+        jumpToVerse(verseIndex) {
+            const startLine = verseStartLines[verseIndex];
+            if (startLine === undefined) return false;
+            return jumpToLineAndZoom(startLine);
         },
 
         handleResize() {

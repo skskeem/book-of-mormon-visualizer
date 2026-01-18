@@ -11,6 +11,12 @@ export class SearchControls {
         this.semanticStatus = document.getElementById('semantic-status');
         this.semanticThresholdContainer = document.getElementById('semantic-threshold-container');
         this.semanticThreshold = document.getElementById('semantic-threshold');
+        this.semanticResultsContainer = document.getElementById('semantic-results-container');
+        this.semanticResultsStatus = document.getElementById('semantic-results-status');
+        this.semanticResultsList = document.getElementById('semantic-results-list');
+        this.crossRefContainer = document.getElementById('crossref-container');
+        this.crossRefStatus = document.getElementById('crossref-status');
+        this.crossRefList = document.getElementById('crossref-list');
         this.searchTerm = '';
         this.semanticSearchTimer = null;
 
@@ -38,6 +44,28 @@ export class SearchControls {
             this.semanticThreshold.addEventListener('input', () => {
                 if (this.isSemanticEnabled() && this.searchTerm.length >= 2) {
                     this.handleSemanticSearchInput();
+                }
+            });
+        }
+
+        if (this.crossRefList) {
+            this.crossRefList.addEventListener('click', (event) => {
+                const target = event.target.closest('[data-verse-index]');
+                if (!target || !this.visualization) return;
+                const verseIndex = Number(target.getAttribute('data-verse-index'));
+                if (Number.isFinite(verseIndex)) {
+                    this.visualization.jumpToVerse(verseIndex);
+                }
+            });
+        }
+
+        if (this.semanticResultsList) {
+            this.semanticResultsList.addEventListener('click', (event) => {
+                const target = event.target.closest('[data-verse-index]');
+                if (!target || !this.visualization) return;
+                const verseIndex = Number(target.getAttribute('data-verse-index'));
+                if (Number.isFinite(verseIndex)) {
+                    this.visualization.jumpToVerse(verseIndex);
                 }
             });
         }
@@ -114,6 +142,7 @@ export class SearchControls {
                 this.searchResults.textContent = 'No semantic matches found';
             }
             this.nextMatchBtn.disabled = count === 0;
+            this.updateSemanticResultsList();
             return;
         }
 
@@ -129,6 +158,9 @@ export class SearchControls {
             this.searchResults.textContent = 'No matches found';
         }
         this.nextMatchBtn.disabled = count === 0;
+        this.updateCrossRefs();
+        this.updateCrossRefs();
+        this.updateSemanticResultsList();
     }
 
     handleNextMatch() {
@@ -153,6 +185,8 @@ export class SearchControls {
             this.handleSemanticSearchInput();
         }
         this.updateSemanticStatus();
+        this.updateCrossRefs();
+        this.updateSemanticResultsList();
         
         // Show/hide threshold input
         if (this.semanticThresholdContainer) {
@@ -186,10 +220,13 @@ export class SearchControls {
                 this.searchResults.textContent = result.message || 'Semantic search unavailable';
                 this.nextMatchBtn.disabled = true;
                 this.updateSemanticStatus();
+                this.updateCrossRefs();
+                this.updateSemanticResultsList();
                 return;
             }
             this.updateSemanticStatus();
             this.updateSearchResults();
+            this.updateSemanticResultsList();
         }, 300);
     }
 
@@ -205,6 +242,8 @@ export class SearchControls {
             this.visualization.clearSearch();
         }
         this.updateSemanticStatus();
+        this.clearCrossRefs();
+        this.clearSemanticResults();
     }
 
     setVisualization(visualization) {
@@ -244,6 +283,129 @@ export class SearchControls {
         const status = this.visualization.getSemanticStatus();
         if (status?.message) {
             this.semanticStatus.textContent = status.message;
+        }
+    }
+
+    clearCrossRefs() {
+        if (this.crossRefStatus) {
+            this.crossRefStatus.textContent = '';
+        }
+        if (this.crossRefList) {
+            this.crossRefList.innerHTML = '';
+        }
+    }
+
+    clearSemanticResults() {
+        if (this.semanticResultsStatus) {
+            this.semanticResultsStatus.textContent = '';
+        }
+        if (this.semanticResultsList) {
+            this.semanticResultsList.innerHTML = '';
+        }
+    }
+
+    updateSemanticResultsList() {
+        if (!this.semanticResultsContainer || !this.visualization) return;
+
+        if (!this.isSemanticEnabled()) {
+            this.clearSemanticResults();
+            return;
+        }
+
+        const scores = this.visualization.getSemanticScores();
+        if (!scores || scores.length === 0) {
+            this.clearSemanticResults();
+            if (this.semanticResultsStatus) {
+                this.semanticResultsStatus.textContent = 'No semantic results yet.';
+            }
+            return;
+        }
+
+        const sorted = scores
+            .slice()
+            .sort((a, b) => b.score - a.score);
+
+        if (this.semanticResultsStatus) {
+            this.semanticResultsStatus.textContent = `Showing ${sorted.length} semantic result${sorted.length !== 1 ? 's' : ''}`;
+        }
+
+        if (this.semanticResultsList) {
+            this.semanticResultsList.innerHTML = sorted.map((entry) => {
+                const verseInfo = this.visualization.getVerseInfo(entry.verseIndex);
+                const safeText = verseInfo.text ? verseInfo.text.replace(/</g, '&lt;').replace(/>/g, '&gt;') : '';
+                return `
+                    <div class="semantic-result-item" data-verse-index="${entry.verseIndex}">
+                        <div>
+                            <span class="semantic-result-ref">${verseInfo.reference}</span>
+                            <span class="semantic-result-score">${entry.score.toFixed(3)}</span>
+                        </div>
+                        <div class="semantic-result-text">${safeText}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+    }
+
+    async updateCrossRefs() {
+        if (!this.visualization || !this.crossRefContainer) return;
+
+        const totalMatches = this.isSemanticEnabled()
+            ? this.visualization.getSemanticResultCount()
+            : this.visualization.getSearchResultCount();
+
+        if (totalMatches === 0) {
+            this.clearCrossRefs();
+            if (this.crossRefStatus) {
+                this.crossRefStatus.textContent = 'Run a search to see cross-references.';
+            }
+            return;
+        }
+
+        const currentMatchIndex = this.visualization.getCurrentMatchIndex();
+        const matchIndex = currentMatchIndex >= 0 ? currentMatchIndex : 0;
+        const thresholdValue = this.semanticThreshold?.value;
+        const minScore = thresholdValue && thresholdValue !== '' ? parseFloat(thresholdValue) : 0.25;
+
+        if (this.crossRefStatus) {
+            this.crossRefStatus.textContent = 'Finding related verses...';
+        }
+
+        const result = await this.visualization.getAutoCrossRefsForMatch(matchIndex, minScore, 10);
+        if (!result || result.status !== 'ready') {
+            if (this.crossRefStatus) {
+                this.crossRefStatus.textContent = result?.message || 'Cross-references unavailable.';
+            }
+            if (this.crossRefList) {
+                this.crossRefList.innerHTML = '';
+            }
+            return;
+        }
+
+        const refs = result.refs || [];
+        if (this.crossRefStatus) {
+            this.crossRefStatus.textContent = refs.length > 0
+                ? `Top ${refs.length} related verses`
+                : 'No cross-references above threshold.';
+        }
+
+        if (this.crossRefList) {
+            if (refs.length === 0) {
+                this.crossRefList.innerHTML = '';
+                return;
+            }
+
+            this.crossRefList.innerHTML = refs.map((ref) => {
+                const safeText = ref.text ? ref.text.replace(/</g, '&lt;').replace(/>/g, '&gt;') : '';
+                return `
+                    <div class="crossref-item" data-verse-index="${ref.verseIndex}">
+                        <div>
+                            <span class="crossref-ref">${ref.reference}</span>
+                            <span class="crossref-score">${ref.score.toFixed(3)}</span>
+                        </div>
+                        <div class="crossref-text">${safeText}</div>
+                    </div>
+                `;
+            }).join('');
         }
     }
 }
